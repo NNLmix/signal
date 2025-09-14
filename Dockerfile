@@ -2,24 +2,24 @@
 
 FROM python:3.11-slim
 
-# Make Python friendlier in containers
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# System deps (only what pip builds might need)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
  && rm -rf /var/lib/apt/lists/*
 
-# ---- Install Python deps
-# requirements.txt is at repo root
+# Install deps first for better caching
 COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# ---- Copy app code (repo root -> /app)
+# Copy source code
 COPY . .
 
-# If supervisord.conf uses relative paths, it's now at /app/supervisord.conf
+# --- NEW: copy the model directory explicitly (robust vs .dockerignore) ---
+COPY models/ /app/models/
+
+# Run everything under supervisord (you already have this file)
 CMD ["supervisord", "-c", "/app/supervisord.conf"]
