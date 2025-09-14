@@ -3,4 +3,7 @@ openai==0.28.0
 supabase-py==0.0.7
 python-dotenv==1.0.0
 websockets==11.0.3
-redis\naiohttp>=3.9.0\npandas>=2.0.0\nnumpy>=1.24.0\n
+redis
+aiohttp>=3.9.0
+pandas>=2.0.0
+numpy>=1.24.0
