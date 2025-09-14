@@ -1,40 +1,47 @@
-# fast_model.py
-import os
+import logging
 from pathlib import Path
-import joblib
+import numpy as np
 
-# ---- resolve model path safely
-BASE_DIR = Path(__file__).resolve().parent
-env_path = os.getenv("FAST_MODEL_PATH", "").strip()
-MODEL_PATH = Path(env_path) if env_path else (BASE_DIR / "models" / "fast_lgbm.pkl")
-if MODEL_PATH.is_dir():  # guard against passing a directory by mistake
-    MODEL_PATH = MODEL_PATH / "fast_lgbm.pkl"
-if not MODEL_PATH.exists():
-    alt = Path("/app/models/fast_lgbm.pkl")
-    if alt.exists():
-        MODEL_PATH = alt
+logger = logging.getLogger(__name__)
 
-# ---- local fallback model so the pipeline can run
-class DummyModel:
-    def __init__(self, score=0.5):
-        self.score = float(score)
+try:
+    import lightgbm as lgb
+except Exception:
+    lgb = None
+
+MODEL_PATH = Path(__file__).parent / "models" / "fast_lgbm.txt"
+
+class _FallbackDummy:
     def predict(self, X):
-        try:
-            n = len(X)
-        except TypeError:
-            n = 1
-        return [self.score for _ in range(n)]
+        n = X.shape[0] if hasattr(X, "shape") else len(X)
+        return np.full((n,), 0.5, dtype=float)
 
-def _load_model():
+_booster = None
+
+def _load():
+    global _booster
+    if _booster is not None: return _booster
+    if lgb is None:
+        logger.warning("[fast_model] lightgbm not installed; using fallback dummy")
+        _booster = _FallbackDummy(); return _booster
     try:
-        return joblib.load(str(MODEL_PATH))
+        if MODEL_PATH.exists():
+            _booster = lgb.Booster(model_file=str(MODEL_PATH))
+            logger.info("[fast_model] Loaded LightGBM booster from %s", MODEL_PATH)
+        else:
+            logger.warning("[fast_model] %s not found; using fallback dummy", MODEL_PATH)
+            _booster = _FallbackDummy()
     except Exception as e:
-        # If the pickle was created with a different module path, unpickle may fail.
-        # Fall back to a local dummy so the service can run.
-        print(f"[fast_model] Warning: failed to load {MODEL_PATH} ({e}). Using DummyModel(0.5).")
-        return DummyModel(0.5)
+        logger.warning("[fast_model] Failed to load booster (%s); using dummy", e)
+        _booster = _FallbackDummy()
+    return _booster
 
-model = _load_model()
-
-def fast_score(features):
-    return float(model.predict([features])[0])
+def fast_score(feature_rows) -> float:
+    booster = _load()
+    try:
+        preds = booster.predict(feature_rows)
+        if hasattr(preds, "__len__"): return float(np.mean(preds))
+        return float(preds)
+    except Exception as e:
+        logger.warning("[fast_model] predict error: %s; fallback 0.5", e)
+        return 0.5

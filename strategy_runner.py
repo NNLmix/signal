@@ -1,25 +1,46 @@
-import asyncio, os, pandas as pd
-from logging_setup import logger
-from data.binance_public import fetch_klines
-from strategies.scalp_5m import Scalp5M, StrategyConfig
-from storage import save_signal
-SYMBOL = os.getenv("SYMBOL","BTCUSDT"); RR = float(os.getenv("RR","2.0")); RISK=float(os.getenv("RISK","0.01")); ACCOUNT=float(os.getenv("ACCOUNT","10000"))
-SESSION_FILTER = os.getenv("SESSION_FILTER","1")=="1"; POLL_SECONDS=int(os.getenv("POLL_SECONDS","120"))
-async def once():
-    df5 = await fetch_klines(SYMBOL,"5m",500); df1 = await fetch_klines(SYMBOL,"1h",500)
-    df5.index = pd.to_datetime(df5.index, utc=True); df1.index = pd.to_datetime(df1.index, utc=True)
-    strat = Scalp5M(StrategyConfig(rr=RR, risk_per_trade=RISK, account_balance=ACCOUNT, enable_session_filter=SESSION_FILTER))
-    sigs = strat.generate_signals(df5, df1)
-    if not sigs: logger.info("strategy.no_signals %s", {"symbol": SYMBOL}); return
-    last_ts = df5.index[-1].isoformat()
-    for s in sigs:
-        if s["time"].isoformat()==last_ts:
-            await save_signal(SYMBOL, s["time"].isoformat(), s["direction"], s["entry"], s["sl"], s["tp"], s["size"], s["meta"])
-            logger.info("strategy.signal_saved %s", {"symbol": SYMBOL, "time": last_ts, "dir": s["direction"]})
-async def main():
-    logger.info("strategy_runner.start %s", {"symbol": SYMBOL})
-    while True:
-        try: await once()
-        except Exception as e: logger.exception("strategy_runner.error %s", {"error": str(e)})
-        await asyncio.sleep(POLL_SECONDS)
-if __name__ == "__main__": asyncio.run(main())
+import hashlib, logging
+from typing import List
+from config import DEDUP_TTL_SEC
+from fast_model import fast_score
+from redis_client import cache_features, queue_signal, dedup_try_set
+from router import STRATEGIES
+
+logger = logging.getLogger(__name__)
+
+def _dedup_key(sig: dict) -> str:
+    base = f"{sig.get('symbol')}|{sig.get('timeframe','')}|{sig.get('strategy')}|{sig.get('candle_open','')}|{sig.get('side')}|{sig.get('entry_price')}|{sig.get('tp')}|{sig.get('sl')}"
+    import hashlib as _h; return _h.sha1(base.encode('utf-8')).hexdigest()
+
+async def run_strategies_for_symbol(symbol: str, df_ltf, df_htf) -> List[dict]:
+    out = []
+    for s in STRATEGIES:
+        try:
+            sigs = s.generate_signals(df_ltf, df_htf)
+            for sig in sigs:
+                sig['symbol'] = symbol
+                sig['strategy'] = s.name
+                sig['timeframe'] = getattr(s, 'timeframe', '5m')
+                sig.setdefault('candle_open', df_ltf.index[-1].isoformat())
+                out.append(sig)
+        except Exception as e:
+            logger.warning("strategy.exec.error %s", {"strategy": getattr(s, 'name','?'), "error": str(e)})
+    return out
+
+async def evaluate_and_queue(symbol: str, df_ltf, df_htf):
+    signals = await run_strategies_for_symbol(symbol, df_ltf, df_htf)
+    if not signals: return
+    features = {
+        "close": float(df_ltf["close"].iloc[-1]),
+        "atr": float((df_ltf["high"].iloc[-14:].max() - df_ltf["low"].iloc[-14:].min()) / 14.0),
+        "rsi_like": float((df_ltf["close"].iloc[-1] - df_ltf["close"].iloc[-14]) / max(1e-9, df_ltf["close"].iloc[-14])),
+    }
+    cache_features(symbol, features)
+    score = fast_score([[features["close"], features["atr"], features["rsi_like"]]])
+    for sig in signals:
+        sig["model_score"] = score
+        key = _dedup_key(sig)
+        if not dedup_try_set(key, DEDUP_TTL_SEC):
+            logger.info("signal.duplicate_skipped %s", {"dedup_key": key}); continue
+        sig["dedup_key"] = key
+        queue_signal(sig)
+        logger.info("signal.queued %s", {"symbol": symbol, "strategy": sig["strategy"], "side": sig.get("side")})

@@ -1,10 +1,15 @@
-import logging, os, sys
-LOG_LEVEL = os.getenv("LOG_LEVEL","INFO").upper()
-handler = logging.StreamHandler(sys.stdout)
-formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s", "%Y-%m-%dT%H:%M:%SZ")
-handler.setFormatter(formatter)
-root = logging.getLogger()
-root.setLevel(LOG_LEVEL)
-if not any(isinstance(h, logging.StreamHandler) for h in root.handlers):
+import json, logging, os, sys
+
+def setup_json_logging(level: str = "INFO"):
+    class JsonFormatter(logging.Formatter):
+        def format(self, record):
+            payload = {"level": record.levelname, "msg": record.getMessage(), "logger": record.name}
+            if record.exc_info:
+                payload["exc_info"] = self.formatException(record.exc_info)
+            return json.dumps(payload, ensure_ascii=False)
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(JsonFormatter())
+    root = logging.getLogger()
+    root.handlers.clear()
     root.addHandler(handler)
-logger = logging.getLogger("bot")
+    root.setLevel(level or os.getenv("LOG_LEVEL", "INFO"))

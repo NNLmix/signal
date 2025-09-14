@@ -1,31 +1,20 @@
-import asyncio
-from redis_client import pop_signal, get_features
-from notifier import notify_group
-from fast_model import fast_score
-from ai_evaluator import ask_ai_async
-from storage import save_signal
+import asyncio, logging, uvicorn
+from logging_setup import setup_json_logging
+from config import LOG_LEVEL, HEALTH_PORT
+from bot import start_polling
+from processor import run as run_processor
+from health import app as health_app
 
-FAST_THRESHOLD = 0.65
+setup_json_logging(LOG_LEVEL)
+logger = logging.getLogger(__name__)
 
-async def process_signals():
-    while True:
-        signal = pop_signal()
-        if not signal:
-            await asyncio.sleep(0.5)
-            continue
+async def _run_processor():
+    await run_processor()
 
-        features = get_features(signal["symbol"])
-        if not features:
-            continue
+def run_health():
+    uvicorn.run(health_app, host="0.0.0.0", port=HEALTH_PORT, log_level="warning")
 
-        prob = fast_score(features)
-        if prob >= FAST_THRESHOLD:
-            saved = await save_signal(signal)
-            if saved:
-                await notify_group(saved)
-                asyncio.create_task(ask_ai_async(saved, features))
-        else:
-            print(f"Сигнал отклонён fast-model: {prob:.2f}")
-
-async def main():
-    await asyncio.gather(process_signals())
+if __name__ == "__main__":
+    logger.info("starting.all {}", {})
+    asyncio.get_event_loop().create_task(_run_processor())
+    start_polling()

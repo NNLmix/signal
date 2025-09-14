@@ -1,25 +1,9 @@
-# Dockerfile (repo root)
-
 FROM python:3.11-slim
-
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
-
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates build-essential && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
- && rm -rf /var/lib/apt/lists/*
-
-# Install deps first for better caching
-COPY requirements.txt ./requirements.txt
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy source code
 COPY . .
-
-# --- NEW: copy the model directory explicitly (robust vs .dockerignore) ---
-COPY models/ /app/models/
-
-# Run everything under supervisord (you already have this file)
-CMD ["supervisord", "-c", "/app/supervisord.conf"]
+EXPOSE 8080
+CMD ["supervisord", "-c", "supervisord.conf"]
