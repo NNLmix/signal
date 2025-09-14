@@ -1,33 +1,25 @@
-# Keep your source files in the build context!
-# Ignore only typical junk and local artifacts.
+# .dockerignore (repo root)
 
-# Python
+# Python junk
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
-*.so
 *.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local envs / virtualenvs
 .env
 .venv
 venv/
-dist/
-build/
 
-# VCS
-.git
-.gitignore
+# VCS and editor files
+.git/
 .gitattributes
-
-# OS
 .DS_Store
-Thumbs.db
-
-# IDE
 .vscode/
 .idea/
 
-# Coverage / test artifacts
-.coverage
-htmlcov/
-.pytest_cache/
+# Build artifacts
+dist/
+build/
