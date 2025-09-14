@@ -1,0 +1,33 @@
+# Keep your source files in the build context!
+# Ignore only typical junk and local artifacts.
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.env
+.venv
+venv/
+dist/
+build/
+
+# VCS
+.git
+.gitignore
+.gitattributes
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Coverage / test artifacts
+.coverage
+htmlcov/
+.pytest_cache/
