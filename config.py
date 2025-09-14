@@ -40,3 +40,11 @@ TRADE_EXECUTION_ENABLED = os.getenv("TRADE_EXECUTION_ENABLED", "false").lower() 
 # Scalp risk params (ATR multiples)
 SCALP_SL_ATR = float(os.getenv("SCALP_SL_ATR", "1.0"))   # default tighter SL
 SCALP_TP_ATR = float(os.getenv("SCALP_TP_ATR", "2.0"))   # default RR ~ 1:2
+
+
+# External keys (for future use; signals-only now)
+BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "")
+BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET", "")
+
+# Optional custom path for the LightGBM model (txt or pkl)
+FAST_MODEL_PATH = os.getenv("FAST_MODEL_PATH", str((__file__ and __import__('pathlib').Path(__file__).parent / "models" / "fast_lgbm.txt")))

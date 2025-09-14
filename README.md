@@ -32,3 +32,7 @@ SCALP_TP_ATR=2.0
 alter table signals add column if not exists dedup_key text;
 create unique index if not exists signals_dedup_key_unique on signals(dedup_key);
 ```
+
+
+### Model path override
+Set `FAST_MODEL_PATH` to point to a LightGBM native `.txt` or pickled Booster `.pkl` (e.g. `/app/models/fast_lgbm.pkl`).
