@@ -1,11 +1,15 @@
 import asyncio, logging
 from ai_evaluator import ask_ai_async
 from bot import send_signal_message
-from redis_client import pop_signal, get_features
+from redis_client import pop_signal, get_features, is_available, _log_once
 from storage import save_signal
 logger = logging.getLogger(__name__)
 
 async def _process_once():
+    if not is_available():
+        _log_once('redis.unavailable (processor); will retry')
+        await asyncio.sleep(2.0)
+        return
     sig = pop_signal()
     if not sig:
         await asyncio.sleep(0.5); return

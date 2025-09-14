@@ -2,7 +2,7 @@ import asyncio, logging, pandas as pd
 from config import SYMBOLS, LTF, HTF, TRADE_EXECUTION_ENABLED
 from binance_client import fetch_klines
 from strategy_runner import evaluate_and_queue
-from redis_client import get_last_candle_ts, set_last_candle_ts
+from redis_client import get_last_candle_ts, set_last_candle_ts, is_available, _log_once
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +17,9 @@ def _klines_to_df(klines):
     return df[["open","high","low","close","volume"]]
 
 async def _process_symbol(symbol: str):
+    if not is_available():
+        _log_once('redis.unavailable (feeder); will retry')
+        return
     ltf_raw = await fetch_klines(symbol, LTF, limit=210)
     htf_raw = await fetch_klines(symbol, HTF, limit=210)
     df_ltf = _klines_to_df(ltf_raw)
