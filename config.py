@@ -48,3 +48,9 @@ BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET", "")
 
 # Optional custom path for the LightGBM model (txt or pkl)
 FAST_MODEL_PATH = os.getenv("FAST_MODEL_PATH", str((__file__ and __import__('pathlib').Path(__file__).parent / "models" / "fast_lgbm.txt")))
+
+
+# Redis TLS/DNS options
+REDIS_TLS_INSECURE = os.getenv("REDIS_TLS_INSECURE", "false").lower() in ("1","true","yes")
+REDIS_CA_PATH = os.getenv("REDIS_CA_PATH", "")  # e.g. /etc/ssl/certs/ca-certificates.crt
+REDIS_HOST_OVERRIDE = os.getenv("REDIS_HOST_OVERRIDE", "")  # optional: force a host/IP instead of DNS in REDIS_URL

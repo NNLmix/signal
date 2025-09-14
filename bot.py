@@ -39,7 +39,7 @@ async def cmd_diag(message: types.Message):
     ok = lambda d: "✅" if d.get("ok") else "❌"
     text = (
         "*Diagnostics*\n"
-        f"Redis: {ok(info.get('redis', {}))} (queue={info.get('redis',{}).get('queue_len',0)})\n"
+        f"Redis: {ok(info.get('redis', {}))} (queue={info.get('redis',{}).get('queue_len',0)}, target={info.get('redis',{}).get('target',{})})\n"
         f"Supabase: {ok(info.get('supabase', {}))} (status={info.get('supabase',{}).get('status','?')}, "
         f"latency={info.get('supabase',{}).get('latency_ms','?')}ms)\n"
         f"Binance: {ok(info.get('binance', {}))} (latency={info.get('binance',{}).get('latency_ms','?')}ms)\n"

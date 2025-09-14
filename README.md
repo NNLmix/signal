@@ -36,3 +36,9 @@ create unique index if not exists signals_dedup_key_unique on signals(dedup_key)
 
 ### Model path override
 Set `FAST_MODEL_PATH` to point to a LightGBM native `.txt` or pickled Booster `.pkl` (e.g. `/app/models/fast_lgbm.pkl`).
+
+
+## Redis TLS / DNS options
+- `REDIS_TLS_INSECURE=true` — disable cert verification (use only for debugging).
+- `REDIS_CA_PATH=/etc/ssl/certs/ca-certificates.crt` — custom CA bundle if needed.
+- `REDIS_HOST_OVERRIDE=<ip-or-host>` — force a specific host/IP, keeping credentials from `REDIS_URL`.

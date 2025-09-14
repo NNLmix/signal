@@ -2,6 +2,7 @@ import asyncio, aiohttp, time
 from typing import Dict, Any
 from config import SUPABASE_URL, BINANCE_BASE, SYMBOLS, LTF, HTF
 from redis_client import is_available as redis_ok, queue_len
+from redis_client import _host_port_tls
 
 async def supabase_ok() -> Dict[str, Any]:
     # Prefer the auth health endpoint (no auth required)
@@ -31,7 +32,7 @@ async def binance_ok() -> Dict[str, Any]:
 async def gather_diag() -> Dict[str, Any]:
     sup_task = asyncio.create_task(supabase_ok())
     bin_task = asyncio.create_task(binance_ok())
-    red = {"ok": redis_ok(), "queue_len": queue_len()}
+    red = {"ok": redis_ok(), "queue_len": queue_len(), "target": _host_port_tls()}
     sup = await sup_task
     bn = await bin_task
     return {
