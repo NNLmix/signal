@@ -4,6 +4,7 @@ import redis
 from urllib.parse import urlparse
 from typing import Optional
 from config import REDIS_URL, REDIS_TLS_INSECURE, REDIS_CA_PATH, REDIS_HOST_OVERRIDE
+
 try:
     print("redis.__version__=" + getattr(redis, "__version__", "?"), flush=True)
 except Exception:
