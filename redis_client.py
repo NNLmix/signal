@@ -43,7 +43,7 @@ def _make_client():
         socket_timeout=2.5,
         health_check_interval=30,
         ssl=bool(ssl_ctx),
-        ssl_cert_reqs=ssl_ctx.verify_mode if ssl_ctx else None,
+        ssl_cert_reqs=None,
         ssl_ca_certs=REDIS_CA_PATH or None,
         ssl_check_hostname=False if REDIS_TLS_INSECURE else True
     )
