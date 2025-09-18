@@ -7,5 +7,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Koyeb health check требует web-сервер → uvicorn слушает 8000
+# Expose port 8000 for Koyeb health check
+EXPOSE 8000
+
 CMD ["python", "-u", "main.py"]
