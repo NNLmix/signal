@@ -3,6 +3,7 @@ import asyncio
 import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
+from aiogram import Bot
 from aiogram.types import Update
 from bot import bot, dp
 from config import KOYEB_APP_URL, WEBHOOK_URL
@@ -54,10 +55,10 @@ app = FastAPI(lifespan=lifespan)
 async def telegram_webhook(request: Request):
     data = await request.json()
     update = Update(**data)
-    bot.set_current(bot)
+    Bot.set_current(bot)
     try:
         # process with aiogram v2 dispatcher
         await dp.process_update(update)
-    finally:
-        bot.reset_current()
+    except Exception as e:
+        logger.exception("Error processing update: %s", e)
     return {"ok": True}
