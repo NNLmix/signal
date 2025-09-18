@@ -11,19 +11,36 @@ dp = Dispatcher(bot)
 
 @dp.message_handler(commands=['diag'])
 async def handle_diag(message: types.Message):
-    """Handle /diag command. Works in private and group chats."""
+    """Run diagnostics and reply in the same chat where the command arrived."""
     try:
         diag = await gather_diag()
         # send a concise JSON summary
         text = json.dumps(diag, ensure_ascii=False, indent=2)
-        # respect chat from which command came
+        # reply in the same chat
         await message.reply(f"<pre>{text}</pre>", parse_mode="HTML")
     except Exception as e:
         logger.exception("Error while running /diag: %s", e)
-        await message.reply(f"Diag failed: {e}")
+        # Best-effort reply
+        try:
+            await message.reply(f"Diag failed: {e}")
+        except Exception:
+            logger.exception("Also failed to send failure message")
 
+@dp.message_handler(commands=['ping'])
+async def handle_ping(message: types.Message):
+    """Simple ping — should reply in the same chat (group or private)."""
+    try:
+        await message.reply("pong")
+    except Exception as e:
+        logger.exception("Error handling /ping: %s", e)
+        # Fallback: try sending to configured TELEGRAM_CHAT_ID if available
+        if TELEGRAM_CHAT_ID:
+            try:
+                await bot.send_message(TELEGRAM_CHAT_ID, "pong (fallback)")
+            except Exception:
+                logger.exception("Fallback send_message also failed")
 
 async def start_polling():
-    """Асинхронный запуск бота (без executor, чтобы не ломать event loop uvicorn)."""
+    """Start polling (kept for backward compatibility)."""
     logger.info("Starting Telegram bot polling...")
     await dp.start_polling()
