@@ -34,7 +34,6 @@ async def _health_logger(period_sec: int = 60):
 
 
 async def main():
-    # запускаем все таски параллельно
     await asyncio.gather(
         _run_bot(),
         _run_processor(),
@@ -43,7 +42,6 @@ async def main():
 
 
 if __name__ == "__main__":
-    # запускаем health-сервер для Koyeb (обязательно порт 8000)
     config = uvicorn.Config(health_app, host="0.0.0.0", port=HEALTH_PORT, log_level="info")
     server = uvicorn.Server(config)
 
