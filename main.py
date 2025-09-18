@@ -1,35 +1,42 @@
 import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
-from aiogram import Bot, Dispatcher
 from aiogram.types import Update
-from config import TELEGRAM_BOT_TOKEN
+from bot import bot, dp
+import bot_runner
 
 logging.basicConfig(level=logging.INFO)
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logging.info("Starting application lifespan: attaching bot and dispatcher")
+    # Optionally perform webhook setup if using webhook mode
+    try:
+        await bot_runner.on_startup()
+    except Exception as e:
+        logging.warning("bot_runner.on_startup failed: %s", e)
+    app.state.bot = bot
+    app.state.dp = dp
+    try:
+        yield
+    finally:
+        logging.info("Shutting down application lifespan")
+        try:
+            await bot_runner.on_shutdown()
+        except Exception as e:
+            logging.warning("bot_runner.on_shutdown failed: %s", e)
+        try:
+            await bot.session.close()
+        except Exception:
+            pass
 
-# Initialize bot and dispatcher
-bot = Bot(token=TELEGRAM_BOT_TOKEN, parse_mode="HTML")
-dp = Dispatcher(bot)
+app = FastAPI(lifespan=lifespan)
 
 
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
-    """
-    Handle incoming Telegram updates via webhook.
-    """
     data = await request.json()
     update = Update(**data)
-    await dp.process_update(update)  # ✅ correct for aiogram 2.x
+    # process with aiogram v2 dispatcher
+    await dp.process_update(update)
     return {"ok": True}
-
-
-@app.on_event("startup")
-async def on_startup():
-    logging.info("Bot started")
-
-
-@app.on_event("shutdown")
-async def on_shutdown():
-    logging.info("Bot stopped")
-    await bot.session.close()
