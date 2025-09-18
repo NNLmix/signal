@@ -1,5 +1,7 @@
-# near other imports
-import asyncio, logging, uvicorn
+import asyncio
+import logging
+import uvicorn
+
 from logging_setup import setup_json_logging
 from config import LOG_LEVEL, HEALTH_PORT
 from bot import start_polling
@@ -10,35 +12,41 @@ from diag import gather_diag
 setup_json_logging(LOG_LEVEL)
 logger = logging.getLogger(__name__)
 
+
+async def _run_bot():
+    await start_polling()
+
+
 async def _run_processor():
     await run_processor()
 
+
 async def _health_logger(period_sec: int = 60):
-    # short status line for Koyeb logs; uses gather_diag() already in diag.py
     while True:
         try:
             info = await gather_diag()
             r = info.get("redis", {})
             s = info.get("supabase", {})
-            # small JSON-like short info logged to stdout (logging configured to stdout)
-            logger.info("health.short %s", {
-                "redis_ok": bool(r.get("ok")),
-                "queue_len": int(r.get("queue_len", 0)),
-                "supabase_ok": bool(s.get("ok")),
-                "supabase_status": s.get("status", None),
-                "supabase_latency_ms": s.get("latency_ms", None),
-            })
+            logger.info("health.short", extra={"redis": r.get("status"), "supabase": s.get("status")})
         except Exception as e:
-            logger.exception("health.logger.error %s", {"error": str(e)})
+            logger.warning(f"Health logger failed: {e}")
         await asyncio.sleep(period_sec)
 
-def run_health():
-    uvicorn.run(health_app, host="0.0.0.0", port=HEALTH_PORT, log_level="warning")
+
+async def main():
+    # запускаем все таски параллельно
+    await asyncio.gather(
+        _run_bot(),
+        _run_processor(),
+        _health_logger(),
+    )
+
 
 if __name__ == "__main__":
-    logger.info("starting.all {}", {})
-    # start processor
-    asyncio.get_event_loop().create_task(_run_processor())
-    # start periodic health logger (use small period during debugging)
-    asyncio.get_event_loop().create_task(_health_logger(60))
-    start_polling()
+    # запускаем health-сервер для Koyeb (обязательно порт 8000)
+    config = uvicorn.Config(health_app, host="0.0.0.0", port=HEALTH_PORT, log_level="info")
+    server = uvicorn.Server(config)
+
+    loop = asyncio.get_event_loop()
+    loop.create_task(main())
+    loop.run_until_complete(server.serve())
