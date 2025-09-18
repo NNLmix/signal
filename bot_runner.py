@@ -2,8 +2,9 @@ import asyncio
 from aiogram import Bot, Dispatcher
 from config import TELEGRAM_BOT_TOKEN, WEBHOOK_URL
 
-bot = Bot(token=TELEGRAM_BOT_TOKEN)
-dp = Dispatcher()
+# Create bot and dispatcher
+bot = Bot(token=TELEGRAM_BOT_TOKEN, parse_mode="HTML")
+dp = Dispatcher(bot=bot)
 
 async def on_startup():
     # Set Telegram webhook
