@@ -8,7 +8,7 @@ logging.basicConfig(level=logging.INFO)
 app = FastAPI()
 
 # Initialize bot and dispatcher
-bot = Bot(token="YOUR_TELEGRAM_BOT_TOKEN")
+bot = Bot(token="7516548616:AAHsMmrNMpqAAQ71Dv9iuBUoLr8WdglztYY")
 dp = Dispatcher()
 
 @app.post("/webhook")
