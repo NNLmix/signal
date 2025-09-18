@@ -1,143 +1,219 @@
+# /app/redis_client.py
+"""
+Compatibility Redis client helper.
 
-import json, time, socket, ssl, os
-import redis
+This version expects REDIS_URL to be either redis:// or rediss://.
+If rediss:// is used, we pass ssl_cert_reqs=None to redis.from_url(...) to avoid
+AbstractConnection.__init__() unexpected 'ssl' kwarg errors in some redis-py versions.
+"""
+
+import os
+import logging
+import json
+from typing import Optional, Any, Tuple
 from urllib.parse import urlparse
-from typing import Optional
-from config import REDIS_URL, REDIS_TLS_INSECURE, REDIS_CA_PATH, REDIS_HOST_OVERRIDE
 
-_last_err_log_ts = 0.0
-_last_err_msg = ""
+logger = logging.getLogger(__name__)
 
-def _log_once(msg: str, every_sec: float = 30.0):
-    global _last_err_log_ts, _last_err_msg
-    now = time.time()
-    if now - _last_err_log_ts >= every_sec or msg != _last_err_msg:
-        print(msg, flush=True)
-        _last_err_log_ts = now
-        _last_err_msg = msg
-
-def _ssl_ctx_if_needed(parsed):
-    if parsed.scheme == "rediss":
-        ctx = ssl.create_default_context(cafile=REDIS_CA_PATH or None)
-        if REDIS_TLS_INSECURE:
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-        return ctx
-    return None
-
-def _apply_host_override(url: str) -> str:
-    if not REDIS_HOST_OVERRIDE: return url
-    p = urlparse(url)
-    # rebuild netloc with override host
-    new_netloc = f"{p.username + ':' + p.password + '@' if p.username else ''}{REDIS_HOST_OVERRIDE}:{p.port if p.port else ''}"
-    return f"{p.scheme}://{new_netloc}{p.path or ''}"
-
-def _make_client():
-    url = _apply_host_override(REDIS_URL)
-    parsed = urlparse(url)
-    ssl_ctx = _ssl_ctx_if_needed(parsed)
-    return redis.Redis.from_url(
-        url,
-        decode_responses=True,
-        socket_connect_timeout=2.0,
-        socket_timeout=2.5,
-        health_check_interval=30,
-        ssl=bool(ssl_ctx),
-        ssl_cert_reqs=None,
-        ssl_ca_certs=REDIS_CA_PATH or None,
-        ssl_check_hostname=False if REDIS_TLS_INSECURE else True
-    )
-
-_redis = _make_client()
-
-FEATURE_HASH_PREFIX = "features:"
-SIGNALS_QUEUE = "signals"
-DEDUP_SET_PREFIX = "sigdedup:"
-CANDLE_CACHE_PREFIX = "candles:"  # per symbol/timeframe cache for last ts
-
-def _host_port_tls():
+try:
+    import redis
     try:
-        from urllib.parse import urlparse
-        u = urlparse(REDIS_URL)
-        return {"host": u.hostname, "port": u.port, "scheme": u.scheme, "override": REDIS_HOST_OVERRIDE or None, "tls_insecure": REDIS_TLS_INSECURE}
+        from redis import asyncio as redis_asyncio  # type: ignore
     except Exception:
-        return {}
+        redis_asyncio = None
+except Exception as exc:
+    logger.exception("Failed to import redis library. Install redis>=4.0.0")
+    raise
 
+# Env
+REDIS_URL = os.getenv("REDIS_URL", "").strip()
+REDIS_TLS_INSECURE = os.getenv("REDIS_TLS_INSECURE", "0").lower() in ("1", "true", "yes")
+
+_SOCKET_CONNECT_TIMEOUT = float(os.getenv("REDIS_SOCKET_CONNECT_TIMEOUT", "2.0"))
+_SOCKET_TIMEOUT = float(os.getenv("REDIS_SOCKET_TIMEOUT", "2.5"))
+_HEALTH_CHECK_INTERVAL = int(os.getenv("REDIS_HEALTH_CHECK_INTERVAL", "30"))
+
+_client: Optional["redis.Redis"] = None
+_logged_once: set = set()
+
+def _needs_tls(url: str) -> bool:
+    if not url:
+        return False
+    return urlparse(url).scheme.lower() == "rediss"
+
+def _build_from_url_kwargs() -> dict:
+    return {
+        "decode_responses": True,
+        "socket_connect_timeout": _SOCKET_CONNECT_TIMEOUT,
+        "socket_timeout": _SOCKET_TIMEOUT,
+        "health_check_interval": _HEALTH_CHECK_INTERVAL,
+    }
+
+def get_redis() -> "redis.Redis":
+    global _client
+    if _client is not None:
+        return _client
+    if not REDIS_URL:
+        raise ValueError("REDIS_URL environment variable is not set")
+    tls_required = _needs_tls(REDIS_URL)
+    kwargs = _build_from_url_kwargs()
+    # If TLS required, use ssl_cert_reqs=None to allow TLS without passing 'ssl' kwarg that some versions reject.
+    if tls_required:
+        kwargs["ssl_cert_reqs"] = None
+        if REDIS_TLS_INSECURE:
+            # Some redis-py versions accept ssl_cert_reqs=None only; REDIS_TLS_INSECURE kept for compatibility
+            logger.warning("REDIS_TLS_INSECURE is set; certificate verification may be skipped depending on client.")
+    logger.info("Creating Redis client with url=%s tls=%s", REDIS_URL, tls_required)
+    try:
+        _client = redis.from_url(REDIS_URL, **kwargs)
+        return _client
+    except TypeError as exc:
+        logger.exception("TypeError creating Redis client: %s. Check redis-py version.", exc)
+        raise
+    except Exception:
+        logger.exception("Unexpected error creating Redis client")
+        raise
+
+async def get_async_redis() -> "redis_asyncio.Redis":
+    if redis_asyncio is None:
+        raise ImportError("redis.asyncio not available; ensure redis-py v4+ is installed")
+    if not REDIS_URL:
+        raise ValueError("REDIS_URL environment variable is not set")
+    tls_required = _needs_tls(REDIS_URL)
+    kwargs = _build_from_url_kwargs()
+    if tls_required:
+        kwargs["ssl_cert_reqs"] = None
+    logger.info("Creating async Redis client with url=%s tls=%s", REDIS_URL, tls_required)
+    try:
+        r = redis_asyncio.from_url(REDIS_URL, **kwargs)
+        return r
+    except TypeError as exc:
+        logger.exception("TypeError creating async Redis client: %s", exc)
+        raise
+    except Exception:
+        logger.exception("Unexpected error creating async Redis client")
+        raise
+
+# Compatibility helpers (queue, cache, dedup etc.)
 def is_available() -> bool:
     try:
-        info = _host_port_tls()
-        host = info.get("override") or info.get("host")
-        if host:
-            try: socket.gethostbyname(host)
-            except Exception as e:
-                _log_once(f"redis.dns.error host={host} err={e}")
-                return False
-        _redis.ping()
-        return True
-    except Exception as e:
-        _log_once(f"redis.ping.error {e}")
+        r = get_redis()
+        return bool(r.ping())
+    except Exception as exc:
+        logger.debug("Redis is_available() ping failed: %s", exc)
         return False
 
-def cache_features(symbol: str, features: dict):
+def queue_len(queue_name: str = "signals") -> int:
     try:
-        key = f"{FEATURE_HASH_PREFIX}{symbol}"
-        _redis.hset(key, mapping={k: json.dumps(v, ensure_ascii=False) for k, v in features.items()})
-    except Exception as e:
-        _log_once(f"redis.cache_features.error {e}")
+        r = get_redis()
+        return int(r.llen(queue_name) or 0)
+    except Exception as exc:
+        logger.exception("Failed to get queue_len for %s: %s", queue_name, exc)
+        return 0
 
-def get_features(symbol: str) -> dict:
+def queue_signal(queue_name: str = "signals", value: Any = None) -> int:
     try:
-        key = f"{FEATURE_HASH_PREFIX}{symbol}"
-        raw = _redis.hgetall(key)
-        out = {}
-        for k, v in raw.items():
-            try: out[k] = json.loads(v)
-            except Exception: out[k] = v
-        return out
-    except Exception as e:
-        _log_once(f"redis.get_features.error {e}")
-        return {}
+        r = get_redis()
+        payload = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+        return int(r.lpush(queue_name, payload))
+    except Exception as exc:
+        logger.exception("Failed to queue_signal to %s: %s", queue_name, exc)
+        return -1
 
-def queue_signal(signal: dict):
+def pop_signal(queue_name: str = "signals", timeout: float = 0.0) -> Optional[str]:
     try:
-        _redis.lpush(SIGNALS_QUEUE, json.dumps(signal, ensure_ascii=False))
-    except Exception as e:
-        _log_once(f"redis.queue_signal.error {e}")
-
-def pop_signal():
-    try:
-        data = _redis.rpop(SIGNALS_QUEUE)
-        return json.loads(data) if data else None
-    except Exception as e:
-        _log_once(f"redis.pop_signal.error {e}")
+        r = get_redis()
+        if timeout and float(timeout) > 0:
+            res = r.brpop(queue_name, timeout=float(timeout))
+            if res is None:
+                return None
+            return res[1] if isinstance(res, (list, tuple)) and len(res) >= 2 else res
+        else:
+            return r.rpop(queue_name)
+    except Exception as exc:
+        logger.exception("Failed to pop_signal from %s: %s", queue_name, exc)
         return None
 
-def dedup_try_set(key: str, ttl: int) -> bool:
+def pop_signals_batch(queue_name: str = "signals", batch: int = 10):
+    items = []
     try:
-        ok = _redis.set(f"{DEDUP_SET_PREFIX}{key}", "1", ex=ttl, nx=True)
+        r = get_redis()
+        for _ in range(int(batch)):
+            v = r.rpop(queue_name)
+            if v is None:
+                break
+            items.append(v)
+        return items
+    except Exception as exc:
+        logger.exception("pop_signals_batch failed: %s", exc)
+        return items
+
+def cache_features(key: str, features: Any, ex: int = 3600) -> bool:
+    try:
+        r = get_redis()
+        payload = features if isinstance(features, str) else json.dumps(features, ensure_ascii=False)
+        ok = r.set(name=key, value=payload, ex=int(ex))
         return bool(ok)
-    except Exception as e:
-        _log_once(f"redis.dedup_try_set.error {e}")
+    except Exception as exc:
+        logger.exception("Failed to cache_features for key=%s: %s", key, exc)
         return False
 
-def set_last_candle_ts(symbol: str, timeframe: str, ts: int):
+def get_features(key: str) -> Optional[Any]:
     try:
-        _redis.set(f"{CANDLE_CACHE_PREFIX}{symbol}:{timeframe}", str(ts))
-    except Exception as e:
-        _log_once(f"redis.set_last_candle_ts.error {e}")
+        r = get_redis()
+        val = r.get(key)
+        if val is None:
+            return None
+        if isinstance(val, str) and (val.startswith("{") or val.startswith("[")):
+            try:
+                return json.loads(val)
+            except Exception:
+                return val
+        return val
+    except Exception as exc:
+        logger.exception("get_features failed for key=%s: %s", key, exc)
+        return None
 
-def get_last_candle_ts(symbol: str, timeframe: str) -> int:
+def dedup_try_set(key: str, ttl_seconds: int = 60) -> bool:
     try:
-        v = _redis.get(f"{CANDLE_CACHE_PREFIX}{symbol}:{timeframe}")
-        try: return int(v) if v else 0
-        except: return 0
-    except Exception as e:
-        _log_once(f"redis.get_last_candle_ts.error {e}")
-        return 0
+        r = get_redis()
+        ok = r.set(name=key, value="1", nx=True, ex=int(ttl_seconds))
+        return bool(ok)
+    except Exception as exc:
+        logger.exception("dedup_try_set failed for key=%s: %s", key, exc)
+        return False
 
-def queue_len() -> int:
+def _host_port_tls() -> Tuple[str, int, bool]:
+    if not REDIS_URL:
+        raise ValueError("REDIS_URL not set")
+    u = urlparse(REDIS_URL)
+    host = u.hostname or "localhost"
+    port = u.port or (6379 if u.scheme == "redis" else 6380)
+    return host, port, _needs_tls(REDIS_URL)
+
+def get_last_candle_ts(key: str = "last_candle_ts") -> Optional[int]:
     try:
-        return int(_redis.llen(SIGNALS_QUEUE))
-    except Exception as e:
-        _log_once(f"redis.queue_len.error {e}")
-        return 0
+        val = get_redis().get(key)
+        return int(val) if val is not None else None
+    except Exception as exc:
+        logger.exception("get_last_candle_ts failed: %s", exc)
+        return None
+
+def set_last_candle_ts(ts: int, key: str = "last_candle_ts", ex: int = 3600) -> bool:
+    try:
+        return bool(get_redis().set(key, str(int(ts)), ex=ex))
+    except Exception as exc:
+        logger.exception("set_last_candle_ts failed: %s", exc)
+        return False
+
+def _log_once(msg: str, level: int = logging.INFO) -> None:
+    if msg in _logged_once:
+        return
+    _logged_once.add(msg)
+    logger.log(level, msg)
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.DEBUG)
+    print("Redis available:", is_available())
+    print("Queue length signals:", queue_len("signals"))
+    print("Host/Port/TLS:", _host_port_tls())
