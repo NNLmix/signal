@@ -1,141 +1,124 @@
-# signal/redis_client.py
+# /app/redis_client.py
 """
-Redis client helper for the bot.
+Redis client helper with compatibility helpers expected by the bot.
 
-This module:
-- Reads REDIS_URL from env (expects redis:// or rediss://).
-- If TLS is required (rediss://) it creates and passes an SSLContext to redis.from_url(...)
-  instead of passing boolean ssl flags. This avoids the error:
-    AbstractConnection.__init__() got an unexpected keyword argument 'ssl'
+Provides:
+- get_redis() / get_async_redis()
+- is_available()
+- queue_len(queue_name="signals")
+- queue_signal(queue_name="signals", value)
+- cache_features(key, features_dict, ex=3600)
+- dedup_try_set(key, ttl_seconds)
 
-Usage:
-    from signal.redis_client import get_redis, get_async_redis
-
-    r = get_redis()
-    r.ping()
-
-    # async:
-    r_async = await get_async_redis()
-    await r_async.ping()
+TLS handling:
+- If REDIS_URL scheme is rediss://, an SSLContext is created and passed to redis.from_url(...)
+  (avoids passing boolean ssl flags that may cause AbstractConnection.__init__() errors).
 """
 
 import os
 import ssl
 import logging
-from typing import Optional
+import json
+from typing import Optional, Any
 
 logger = logging.getLogger(__name__)
 
-# Try imports for both sync and async clients
+# Try to import redis (redis-py v4+ expected)
 try:
     import redis
-    # redis.asyncio may be available as part of redis-py v4+
     try:
         from redis import asyncio as redis_asyncio  # type: ignore
     except Exception:
         redis_asyncio = None
 except Exception as exc:
-    logger.exception("Failed to import redis library. Make sure 'redis>=4.0.0' is installed.")
+    logger.exception("Failed to import 'redis' library. Ensure 'redis>=4.0.0' is installed.")
     raise
 
 from urllib.parse import urlparse
 
-# Environment variables
+# Environment variables used by this module
 REDIS_URL = os.getenv("REDIS_URL", "").strip()
-# If set to "1", "true", "yes" (case-insensitive) then certificate verification will be skipped.
 REDIS_TLS_INSECURE = os.getenv("REDIS_TLS_INSECURE", "0").lower() in ("1", "true", "yes")
-# Optional path to CA bundle file (PEM) if you need to use a custom CA.
 REDIS_CA_PATH = os.getenv("REDIS_CA_PATH") or None
 
-# Default connection timeouts (seconds)
 _SOCKET_CONNECT_TIMEOUT = float(os.getenv("REDIS_SOCKET_CONNECT_TIMEOUT", "2.0"))
 _SOCKET_TIMEOUT = float(os.getenv("REDIS_SOCKET_TIMEOUT", "2.5"))
 _HEALTH_CHECK_INTERVAL = int(os.getenv("REDIS_HEALTH_CHECK_INTERVAL", "30"))
 
-def _create_ssl_context(ca_path: Optional[str] = None, insecure: bool = False) -> Optional[ssl.SSLContext]:
-    """
-    Create an SSLContext for connecting to a TLS-enabled Redis server.
-    Return None if TLS is not needed.
-    """
-    ctx = ssl.create_default_context()
+# Singleton client to reuse connections
+_client: Optional["redis.Redis"] = None
 
-    if ca_path:
-        # Use custom CA bundle
-        try:
-            ctx.load_verify_locations(cafile=ca_path)
-            logger.debug("Loaded custom Redis CA file from %s", ca_path)
-        except Exception as exc:
-            logger.warning("Failed to load REDIS_CA_PATH=%s: %s", ca_path, exc)
-
-    if insecure:
-        # Disable hostname checking and certificate verification (not recommended in production)
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        logger.warning("REDIS_TLS_INSECURE is set: TLS certificate verification disabled (insecure).")
-
-    return ctx
 
 def _needs_tls(url: str) -> bool:
     if not url:
         return False
-    parsed = urlparse(url)
-    scheme = parsed.scheme.lower()
+    scheme = urlparse(url).scheme.lower()
     return scheme == "rediss"
 
+
+def _create_ssl_context(ca_path: Optional[str] = None, insecure: bool = False) -> Optional[ssl.SSLContext]:
+    """
+    Create and return an SSLContext for TLS-enabled Redis. Returns None if not needed.
+    """
+    ctx = ssl.create_default_context()
+
+    if ca_path:
+        try:
+            ctx.load_verify_locations(cafile=ca_path)
+            logger.debug("Loaded REDIS_CA_PATH=%s", ca_path)
+        except Exception as exc:
+            logger.warning("Failed to load REDIS_CA_PATH=%s: %s", ca_path, exc)
+
+    if insecure:
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        logger.warning("REDIS_TLS_INSECURE set: skipping TLS certificate verification (insecure).")
+
+    return ctx
+
+
 def _build_from_url_kwargs() -> dict:
-    """Return standardized kwargs for redis.from_url calls."""
-    kwargs = {
+    return {
         "decode_responses": True,
         "socket_connect_timeout": _SOCKET_CONNECT_TIMEOUT,
         "socket_timeout": _SOCKET_TIMEOUT,
         "health_check_interval": _HEALTH_CHECK_INTERVAL,
     }
-    return kwargs
+
 
 def get_redis() -> "redis.Redis":
     """
-    Return a synchronous redis.Redis instance connected according to REDIS_URL.
-
-    Raises ValueError if REDIS_URL is not provided.
+    Return a synchronous redis.Redis client (singleton). Raises ValueError if REDIS_URL not set.
     """
+    global _client
+    if _client is not None:
+        return _client
+
     if not REDIS_URL:
         raise ValueError("REDIS_URL environment variable is not set")
 
     tls_required = _needs_tls(REDIS_URL)
-    ssl_ctx = None
-    if tls_required:
-        ssl_ctx = _create_ssl_context(ca_path=REDIS_CA_PATH, insecure=REDIS_TLS_INSECURE)
+    ssl_ctx = _create_ssl_context(ca_path=REDIS_CA_PATH, insecure=REDIS_TLS_INSECURE) if tls_required else None
 
     kwargs = _build_from_url_kwargs()
-
-    # If we have an SSLContext, pass it as 'ssl' to redis.from_url()
     if ssl_ctx:
         kwargs["ssl"] = ssl_ctx
 
-    logger.info("Connecting to Redis (sync) url=%s tls=%s", REDIS_URL, tls_required)
+    logger.info("Creating Redis (sync) client, url=%s tls=%s", REDIS_URL, tls_required)
     try:
-        r = redis.Redis.from_url(REDIS_URL, **kwargs)
-        # Optionally validate connection now by pinging in a safe manner.
-        # We avoid raising in module import, so do this lazily in callers if desired.
-        return r
+        _client = redis.Redis.from_url(REDIS_URL, **kwargs)
+        return _client
     except TypeError as exc:
-        # More help if redis library version mismatches expected kwargs
-        logger.exception(
-            "Failed to create Redis client. TypeError: %s. Check your redis library version (redis-py v4+ expected).", exc
-        )
+        logger.exception("TypeError creating Redis client: %s. Check redis-py version (v4+).", exc)
         raise
     except Exception:
-        logger.exception("Unexpected error while creating Redis client")
+        logger.exception("Unexpected error creating Redis client")
         raise
+
 
 async def get_async_redis() -> "redis_asyncio.Redis":
     """
-    Return an asyncio redis client (redis.asyncio.Redis). If redis.asyncio isn't
-    available, raises ImportError.
-
-    Usage:
-        r = await get_async_redis()
-        await r.ping()
+    Return an asyncio redis client. Requires redis.asyncio to be present (redis-py v4+).
     """
     if redis_asyncio is None:
         raise ImportError("redis.asyncio not available; ensure redis-py v4+ is installed")
@@ -144,45 +127,109 @@ async def get_async_redis() -> "redis_asyncio.Redis":
         raise ValueError("REDIS_URL environment variable is not set")
 
     tls_required = _needs_tls(REDIS_URL)
-    ssl_ctx = None
-    if tls_required:
-        ssl_ctx = _create_ssl_context(ca_path=REDIS_CA_PATH, insecure=REDIS_TLS_INSECURE)
+    ssl_ctx = _create_ssl_context(ca_path=REDIS_CA_PATH, insecure=REDIS_TLS_INSECURE) if tls_required else None
 
     kwargs = _build_from_url_kwargs()
-
     if ssl_ctx:
         kwargs["ssl"] = ssl_ctx
 
-    logger.info("Connecting to Redis (async) url=%s tls=%s", REDIS_URL, tls_required)
+    logger.info("Creating Redis (async) client, url=%s tls=%s", REDIS_URL, tls_required)
     try:
         r = redis_asyncio.Redis.from_url(REDIS_URL, **kwargs)
         return r
     except TypeError as exc:
-        logger.exception(
-            "Failed to create async Redis client. TypeError: %s. Check your redis library version (redis-py v4+ expected).", exc
-        )
+        logger.exception("TypeError creating async Redis client: %s", exc)
         raise
     except Exception:
-        logger.exception("Unexpected error while creating async Redis client")
+        logger.exception("Unexpected error creating async Redis client")
         raise
 
-# Optional helper: small test function that attempts to PING and returns True/False.
-def test_ping_sync() -> bool:
-    """Return True if Redis PING succeeds, else False (and log the error)."""
+
+# ------------------------
+# Compatibility helper API
+# ------------------------
+
+def is_available(timeout: float = 2.0) -> bool:
+    """
+    Return True if Redis responds to PING, else False. Safe for importing at module load.
+    """
     try:
         r = get_redis()
-        pong = r.ping()
-        logger.info("Redis PING -> %s", pong)
-        return bool(pong)
+        # Use a short socket timeout override to avoid long blocking
+        return bool(r.ping())
     except Exception as exc:
-        logger.exception("Redis ping failed: %s", exc)
+        logger.debug("Redis is_available() ping failed: %s", exc)
         return False
 
-# If someone runs this module directly, perform a simple ping test
+
+def queue_len(queue_name: str = "signals") -> int:
+    """
+    Return length of a Redis list (queue). Returns 0 on error.
+    """
+    try:
+        r = get_redis()
+        length = r.llen(queue_name)
+        return int(length or 0)
+    except Exception as exc:
+        logger.exception("Failed to get queue_len for %s: %s", queue_name, exc)
+        return 0
+
+
+def queue_signal(queue_name: str = "signals", value: Any = None) -> int:
+    """
+    Push `value` (any JSON-serializable object) to the given queue (LPUSH).
+    Returns new length of the list on success, -1 on error.
+    """
+    try:
+        r = get_redis()
+        payload = value
+        # If it's not a string, convert to JSON
+        if not isinstance(value, str):
+            payload = json.dumps(value, ensure_ascii=False)
+
+        length = r.lpush(queue_name, payload)
+        logger.debug("Pushed to queue %s; new length=%s", queue_name, length)
+        return int(length)
+    except Exception as exc:
+        logger.exception("Failed to queue_signal to %s: %s", queue_name, exc)
+        return -1
+
+
+def cache_features(key: str, features: Any, ex: int = 3600) -> bool:
+    """
+    Cache a mapping (or any JSON-serializable object) under the given key.
+    Uses SET key value EX ex. Returns True if OK, False on error.
+    """
+    try:
+        r = get_redis()
+        payload = features if isinstance(features, str) else json.dumps(features, ensure_ascii=False)
+        # Set with expiry
+        ok = r.set(name=key, value=payload, ex=int(ex))
+        return bool(ok)
+    except Exception as exc:
+        logger.exception("Failed to cache_features for key=%s: %s", key, exc)
+        return False
+
+
+def dedup_try_set(key: str, ttl_seconds: int = 60) -> bool:
+    """
+    Try set a deduplication key: return True if the key was set (didn't exist),
+    False if it already existed. Uses SET NX EX atomically.
+    """
+    try:
+        r = get_redis()
+        # redis-py returns True if set, None/False if not set
+        ok = r.set(name=key, value="1", nx=True, ex=int(ttl_seconds))
+        return bool(ok)
+    except Exception as exc:
+        logger.exception("dedup_try_set failed for key=%s: %s", key, exc)
+        return False
+
+
+# If run directly, do a simple ping test
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    ok = test_ping_sync()
-    if ok:
-        print("PING -> True")
-    else:
-        print("PING failed; see logs for details.")
+    available = is_available()
+    print("Redis available:", available)
+    if available:
+        print("Queue length (signals):", queue_len("signals"))
