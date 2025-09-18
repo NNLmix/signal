@@ -17,7 +17,16 @@ redis_client = redis.from_url(
     ssl_context=ssl_context,
 )
 
-# ===== Хелперы для diag.py =====
+# ===== Вспомогательные функции =====
+def _host_port_tls():
+    """Возвращает хост, порт и TLS-статус из REDIS_URL (для diag.py)."""
+    try:
+        url = REDIS_URL.replace("rediss://", "")
+        host, port = url.split(":")
+        return host, int(port), True
+    except Exception:
+        return "unknown", 0, True
+
 async def is_available() -> bool:
     """Проверка доступности Redis."""
     try:
