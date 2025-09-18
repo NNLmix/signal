@@ -54,6 +54,10 @@ app = FastAPI(lifespan=lifespan)
 async def telegram_webhook(request: Request):
     data = await request.json()
     update = Update(**data)
-    # process with aiogram v2 dispatcher
-    await dp.process_update(update)
+    bot.set_current(bot)
+    try:
+        # process with aiogram v2 dispatcher
+        await dp.process_update(update)
+    finally:
+        bot.reset_current()
     return {"ok": True}
