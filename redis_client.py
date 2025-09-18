@@ -1,5 +1,6 @@
 import ssl
 import redis.asyncio as redis
+from urllib.parse import urlparse
 from config import REDIS_URL
 
 # SSL-контекст для Koyeb (без проверки сертификата)
@@ -21,9 +22,11 @@ redis_client = redis.from_url(
 def _host_port_tls():
     """Возвращает хост, порт и TLS-статус из REDIS_URL (для diag.py)."""
     try:
-        url = REDIS_URL.replace("rediss://", "")
-        host, port = url.split(":")
-        return host, int(port), True
+        parsed = urlparse(REDIS_URL)
+        host = parsed.hostname or "unknown"
+        port = parsed.port or 0
+        tls = parsed.scheme == 'rediss'
+        return host, port, tls
     except Exception:
         return "unknown", 0, True
 
