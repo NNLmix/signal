@@ -3,6 +3,7 @@ import asyncio
 
 logger = logging.getLogger(__name__)
 
+
 async def run():
     """Основной процессор сигналов."""
     logger.info("Processor started")
