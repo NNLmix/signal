@@ -34,13 +34,13 @@ async def evaluate_and_queue(symbol: str, df_ltf, df_htf):
         "atr": float((df_ltf["high"].iloc[-14:].max() - df_ltf["low"].iloc[-14:].min()) / 14.0),
         "rsi_like": float((df_ltf["close"].iloc[-1] - df_ltf["close"].iloc[-14]) / max(1e-9, df_ltf["close"].iloc[-14])),
     }
-    await cache_features(symbol, features)
+    cache_features(symbol, features)
     score = fast_score([[features["close"], features["atr"], features["rsi_like"]]])
     for sig in signals:
         sig["model_score"] = score
         key = _dedup_key(sig)
-        if not await dedup_try_set(key, DEDUP_TTL_SEC):
+        if not dedup_try_set(key, DEDUP_TTL_SEC):
             logger.info("signal.duplicate_skipped %s", {"dedup_key": key}); continue
         sig["dedup_key"] = key
-        await queue_signal(sig)
+        queue_signal(sig)
         logger.info("signal.queued %s", {"symbol": symbol, "strategy": sig["strategy"], "side": sig.get("side")})
