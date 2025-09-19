@@ -1,18 +1,43 @@
-# diag.py - patched: Supabase availability check and pretty text output
+# diag.py - patched v2: robust imports to avoid 'signal' stdlib conflict
 import logging
 import asyncio
 import aiohttp
 from typing import Dict, Any
 
+# Robust import of config and redis helpers: try relative import first (package), fallback to top-level module.
 try:
-    from signal.redis_client import is_available as redis_ok, queue_len, _host_port_tls
+    # when package installed or running as module (preferred)
+    from .redis_client import is_available as redis_ok, queue_len, _host_port_tls
 except Exception:
-    # best-effort imports to avoid circular dependencies in some layouts
-    async def redis_ok(): return False
-    async def queue_len(): return 0
-    def _host_port_tls(): return ("unknown", 0, False)
+    try:
+        from redis_client import is_available as redis_ok, queue_len, _host_port_tls
+    except Exception:
+        async def redis_ok(): return False
+        async def queue_len(): return 0
+        def _host_port_tls(): return ("unknown", 0, False)
 
-from signal.config import TELEGRAM_BOT_TOKEN, SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SIGNALS_TABLE, SUPABASE_TIMEOUT
+# attempt to import config values with both relative and absolute imports to avoid 'signal' stdlib collisions
+SUPABASE_URL = None
+SUPABASE_ANON_KEY = None
+SUPABASE_SIGNALS_TABLE = "signals"
+SUPABASE_TIMEOUT = 5
+TELEGRAM_BOT_TOKEN = None
+
+try:
+    # preferred when package layout is used
+    from .config import TELEGRAM_BOT_TOKEN, SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SIGNALS_TABLE, SUPABASE_TIMEOUT
+except Exception:
+    try:
+        # fallback to top-level module import
+        import config as _cfg
+        TELEGRAM_BOT_TOKEN = getattr(_cfg, "TELEGRAM_BOT_TOKEN", TELEGRAM_BOT_TOKEN)
+        SUPABASE_URL = getattr(_cfg, "SUPABASE_URL", SUPABASE_URL)
+        SUPABASE_ANON_KEY = getattr(_cfg, "SUPABASE_ANON_KEY", SUPABASE_ANON_KEY)
+        SUPABASE_SIGNALS_TABLE = getattr(_cfg, "SUPABASE_SIGNALS_TABLE", SUPABASE_SIGNALS_TABLE)
+        SUPABASE_TIMEOUT = getattr(_cfg, "SUPABASE_TIMEOUT", SUPABASE_TIMEOUT)
+    except Exception:
+        # leave defaults if nothing available
+        pass
 
 logger = logging.getLogger(__name__)
 
