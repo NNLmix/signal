@@ -32,6 +32,18 @@ async def lifespan(app: FastAPI):
             polling_task = asyncio.create_task(dp.start_polling())
         yield
     finally:
+    # graceful shutdown: close shared clients
+    try:
+        from .binance_client import close_session as _close_aiohttp
+        await _close_aiohttp()
+    except Exception:
+        logger.exception("closing aiohttp session failed during shutdown")
+    try:
+        from .redis_client import close_client as _close_redis
+        await _close_redis()
+    except Exception:
+        logger.exception("closing redis client failed during shutdown")
+
         logger.info("Shutting down bot lifecycle")
         try:
             if webhook_enabled:

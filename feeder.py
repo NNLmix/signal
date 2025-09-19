@@ -33,7 +33,7 @@ async def _process_symbol(symbol: str):
     # Signals only, no execution
     await evaluate_and_queue(symbol, df_ltf, df_htf)
 
-    set_last_candle_ts(symbol, LTF, last_close_ts)
+    await set_last_candle_ts(symbol, LTF, last_close_ts)
 
 async def run():
     logger.info("feeder.start %s", {"symbols": SYMBOLS, "ltf": LTF, "htf": HTF, "execute": False})
