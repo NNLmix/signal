@@ -1,3 +1,11 @@
+
+# Integrated websocket for Binance streaming
+from binance_ws import start_ws
+
+async def run_ws(symbols):
+    # Start websocket streaming for all configured symbols
+    await start_ws(symbols)
+
 import asyncio, logging, pandas as pd
 from config import SYMBOLS, LTF, HTF, TRADE_EXECUTION_ENABLED
 from binance_client import fetch_klines
