@@ -55,3 +55,20 @@ async def handle_help(message: types.Message):
         "/help - show this message"
     )
     await message.reply(help_text)
+
+
+
+# Ensure /diag uses pretty text if available
+@dp.message_handler(commands=['diag'])
+async def handle_diag(message: types.Message):
+    try:
+        diag = await gather_diag()
+        pretty = diag.get('pretty') if isinstance(diag, dict) else str(diag)
+        if not pretty:
+            pretty = 'No diagnostics available'
+        if len(pretty) > 3500:
+            pretty = pretty[:3500] + '\n\n[truncated]'
+        await message.reply(pretty)
+    except Exception as e:
+        logger.exception('Error handling /diag: %s', e)
+        await message.reply('Failed to collect diagnostics. Check logs.')

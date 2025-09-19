@@ -1,45 +1,40 @@
-# diag.py - patched v2: robust imports to avoid 'signal' stdlib conflict
+# diag.py - patched v3: produce concise human-readable status lines and include Redis error details
 import logging
-import asyncio
 import aiohttp
 from typing import Dict, Any
 
-# Robust import of config and redis helpers: try relative import first (package), fallback to top-level module.
+logger = logging.getLogger(__name__)
+
+# robust imports
 try:
-    # when package installed or running as module (preferred)
-    from .redis_client import is_available as redis_ok, queue_len, _host_port_tls
+    from .redis_client import check_redis, _host_port_tls
 except Exception:
     try:
-        from redis_client import is_available as redis_ok, queue_len, _host_port_tls
+        from redis_client import check_redis, _host_port_tls
     except Exception:
-        async def redis_ok(): return False
-        async def queue_len(): return 0
-        def _host_port_tls(): return ("unknown", 0, False)
+        async def check_redis():
+            return {"available": False, "host": "unknown", "port": 0, "tls": False, "error": "redis client import failed"}
+        def _host_port_tls():
+            return ("unknown", 0, False)
 
-# attempt to import config values with both relative and absolute imports to avoid 'signal' stdlib collisions
+# config import (robust)
+TELEGRAM_BOT_TOKEN = None
 SUPABASE_URL = None
 SUPABASE_ANON_KEY = None
 SUPABASE_SIGNALS_TABLE = "signals"
 SUPABASE_TIMEOUT = 5
-TELEGRAM_BOT_TOKEN = None
-
 try:
-    # preferred when package layout is used
     from .config import TELEGRAM_BOT_TOKEN, SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SIGNALS_TABLE, SUPABASE_TIMEOUT
 except Exception:
     try:
-        # fallback to top-level module import
         import config as _cfg
-        TELEGRAM_BOT_TOKEN = getattr(_cfg, "TELEGRAM_BOT_TOKEN", TELEGRAM_BOT_TOKEN)
-        SUPABASE_URL = getattr(_cfg, "SUPABASE_URL", SUPABASE_URL)
-        SUPABASE_ANON_KEY = getattr(_cfg, "SUPABASE_ANON_KEY", SUPABASE_ANON_KEY)
-        SUPABASE_SIGNALS_TABLE = getattr(_cfg, "SUPABASE_SIGNALS_TABLE", SUPABASE_SIGNALS_TABLE)
-        SUPABASE_TIMEOUT = getattr(_cfg, "SUPABASE_TIMEOUT", SUPABASE_TIMEOUT)
+        TELEGRAM_BOT_TOKEN = getattr(_cfg, 'TELEGRAM_BOT_TOKEN', TELEGRAM_BOT_TOKEN)
+        SUPABASE_URL = getattr(_cfg, 'SUPABASE_URL', SUPABASE_URL)
+        SUPABASE_ANON_KEY = getattr(_cfg, 'SUPABASE_ANON_KEY', SUPABASE_ANON_KEY)
+        SUPABASE_SIGNALS_TABLE = getattr(_cfg, 'SUPABASE_SIGNALS_TABLE', SUPABASE_SIGNALS_TABLE)
+        SUPABASE_TIMEOUT = getattr(_cfg, 'SUPABASE_TIMEOUT', SUPABASE_TIMEOUT)
     except Exception:
-        # leave defaults if nothing available
         pass
-
-logger = logging.getLogger(__name__)
 
 _SUPABASE_HEADERS = {
     "apikey": SUPABASE_ANON_KEY or "",
@@ -50,7 +45,6 @@ _SUPABASE_HEADERS = {
 async def _check_supabase() -> Dict[str, Any]:
     if not SUPABASE_URL or not SUPABASE_ANON_KEY:
         return {"status": "not_configured", "details": "SUPABASE_URL or SUPABASE_ANON_KEY not set"}
-
     url = f"{SUPABASE_URL}/rest/v1/{SUPABASE_SIGNALS_TABLE}"
     params = {"select": "id", "limit": 1}
     try:
@@ -59,7 +53,7 @@ async def _check_supabase() -> Dict[str, Any]:
             async with session.get(url, params=params) as resp:
                 text = await resp.text()
                 if 200 <= resp.status < 300:
-                    return {"status": "ok", "code": resp.status, "details": "table reachable", "sample": text[:500]}
+                    return {"status": "ok", "code": resp.status, "details": "table reachable"}
                 else:
                     return {"status": "error", "code": resp.status, "details": text[:500]}
     except Exception as e:
@@ -67,37 +61,36 @@ async def _check_supabase() -> Dict[str, Any]:
         return {"status": "error", "details": str(e)}
 
 async def gather_diag() -> Dict[str, Any]:
-    diagnostics: Dict[str, Any] = {}
-
-    host, port, tls = _host_port_tls()
-    redis_status = await redis_ok()
-    qlen = await queue_len()
-    diagnostics["redis"] = {
-        "host": host,
-        "port": port,
-        "tls": tls,
-        "available": bool(redis_status),
-        "queue_len": qlen,
-    }
-
+    """Return a dict with both 'pretty' (human string) and 'raw' details for programmatic use."""
+    diagnostics = {}
+    # Supabase
     supa = await _check_supabase()
-    diagnostics["supabase"] = supa
+    diagnostics['supabase_raw'] = supa
+    supa_status = "OK" if supa.get("status") == "ok" else "Unreachable"
 
-    diagnostics["telegram"] = {
-        "token_set": bool(TELEGRAM_BOT_TOKEN),
-        "status": "configured" if TELEGRAM_BOT_TOKEN else "missing token",
-    }
+    # Redis
+    rinfo = await check_redis()
+    diagnostics['redis_raw'] = rinfo
+    if rinfo.get("available"):
+        redis_status = "OK"
+        redis_detail = ""
+    else:
+        redis_status = "Unreachable"
+        err = rinfo.get("error") or "no_detail"
+        # keep a short error message
+        redis_detail = f": {err[:200]}"
 
-    diagnostics["processor"] = {"status": "running"}
+    # Telegram
+    tg_status = "OK" if TELEGRAM_BOT_TOKEN else "Missing"
 
-    pretty_lines = [
-        "==== Service Diagnostics ====",
-        f"Redis: host={host}, port={port}, tls={tls}, available={redis_status}, queue_len={qlen}",
-        f"Supabase: status={supa.get('status')}, code={supa.get('code','')}, detail={supa.get('details','')}",
-        f"Telegram: {'configured' if TELEGRAM_BOT_TOKEN else 'missing token'}",
-        f"Processor: running",
+    # Build pretty multiline text as requested
+    lines = [
+        f"Supabase: {supa_status}",
+        f"Redis: {redis_status}{redis_detail}",
+        f"Telegram: {tg_status}",
     ]
-    pretty_text = "\n".join(pretty_lines)
-    diagnostics["pretty"] = pretty_text
-    logger.info(pretty_text)
+    pretty = "\n".join(lines)
+    diagnostics['pretty'] = pretty
+    # also log detailed structured info
+    logger.info("diag: supabase=%s redis_available=%s redis_err=%s telegram=%s", supa.get('status'), rinfo.get('available'), rinfo.get('error'), bool(TELEGRAM_BOT_TOKEN))
     return diagnostics
