@@ -1,22 +1,28 @@
-# signal/diag.py
+# diag.py - patched: Supabase availability check and pretty text output
 import logging
 import asyncio
 import aiohttp
 from typing import Dict, Any
-from redis_client import is_available as redis_ok, queue_len, _host_port_tls
-from config import TELEGRAM_BOT_TOKEN, SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SIGNALS_TABLE, SUPABASE_TIMEOUT
+
+try:
+    from signal.redis_client import is_available as redis_ok, queue_len, _host_port_tls
+except Exception:
+    # best-effort imports to avoid circular dependencies in some layouts
+    async def redis_ok(): return False
+    async def queue_len(): return 0
+    def _host_port_tls(): return ("unknown", 0, False)
+
+from signal.config import TELEGRAM_BOT_TOKEN, SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SIGNALS_TABLE, SUPABASE_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
-# Minimal headers similar to storage.py but kept here to avoid circular import
 _SUPABASE_HEADERS = {
-    "apikey": SUPABASE_ANON_KEY,
-    "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
+    "apikey": SUPABASE_ANON_KEY or "",
+    "Authorization": f"Bearer {SUPABASE_ANON_KEY}" if SUPABASE_ANON_KEY else "",
     "Content-Type": "application/json",
 }
 
 async def _check_supabase() -> Dict[str, Any]:
-    """Perform a lightweight Supabase check: GET one row from signals table."""
     if not SUPABASE_URL or not SUPABASE_ANON_KEY:
         return {"status": "not_configured", "details": "SUPABASE_URL or SUPABASE_ANON_KEY not set"}
 
@@ -36,10 +42,8 @@ async def _check_supabase() -> Dict[str, Any]:
         return {"status": "error", "details": str(e)}
 
 async def gather_diag() -> Dict[str, Any]:
-    """Collect service diagnostics both as machine-readable dict and human-friendly text."""
     diagnostics: Dict[str, Any] = {}
 
-    # Redis
     host, port, tls = _host_port_tls()
     redis_status = await redis_ok()
     qlen = await queue_len()
@@ -51,30 +55,24 @@ async def gather_diag() -> Dict[str, Any]:
         "queue_len": qlen,
     }
 
-    # Supabase
     supa = await _check_supabase()
     diagnostics["supabase"] = supa
 
-    # Telegram
     diagnostics["telegram"] = {
         "token_set": bool(TELEGRAM_BOT_TOKEN),
         "status": "configured" if TELEGRAM_BOT_TOKEN else "missing token",
     }
 
-    # Processor (extendable)
     diagnostics["processor"] = {"status": "running"}
 
-    # Logging summary (readable)
     pretty_lines = [
         "==== Service Diagnostics ====",
         f"Redis: host={host}, port={port}, tls={tls}, available={redis_status}, queue_len={qlen}",
-        f"Supabase: status={supa.get('status')}, code={supa.get('code', '')}, detail={supa.get('details','')}",
+        f"Supabase: status={supa.get('status')}, code={supa.get('code','')}, detail={supa.get('details','')}",
         f"Telegram: {'configured' if TELEGRAM_BOT_TOKEN else 'missing token'}",
         f"Processor: running",
     ]
     pretty_text = "\n".join(pretty_lines)
-
     diagnostics["pretty"] = pretty_text
     logger.info(pretty_text)
-
     return diagnostics

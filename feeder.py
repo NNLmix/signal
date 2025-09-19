@@ -42,7 +42,7 @@ async def run():
             await asyncio.gather(*[ _process_symbol(s.strip()) for s in SYMBOLS if s.strip() ])
         except Exception as e:
             logger.exception("feeder.loop.error %s", {"error": str(e)})
-        await asyncio.sleep(5)
+        await asyncio.sleep(1)  # reduced to 1s - ensure rate limits are respected; consider using WebSocket
 
 if __name__ == "__main__":
     asyncio.run(run())

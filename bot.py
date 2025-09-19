@@ -44,3 +44,14 @@ async def start_polling():
     """Start polling (kept for backward compatibility)."""
     logger.info("Starting Telegram bot polling...")
     await dp.start_polling()
+
+
+@dp.message_handler(commands=['help'])
+async def handle_help(message: types.Message):
+    help_text = (
+        "/diag - run human-readable diagnostics (Redis/Supabase/Processor)\n"
+        "/ping - quick ping (if available)\n"
+        "/diag_json - raw diagnostics (if enabled)\n"
+        "/help - show this message"
+    )
+    await message.reply(help_text)
