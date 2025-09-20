@@ -1,6 +1,6 @@
 import aiohttp
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, List
 from tenacity import retry, stop_after_attempt, wait_exponential_jitter
 from ..config import settings
 
@@ -28,7 +28,19 @@ class BinanceClient:
         url = f"{self.base}/fapi/v1/klines"
         params = {"symbol": symbol, "interval": interval, "limit": limit}
         async with self.session.get(url, params=params, timeout=settings.REQUEST_TIMEOUT) as r:
-            if r.status == 429 or r.status == 418:
+            if r.status in (429, 418):
                 raise RuntimeError(f"binance_rate_limit status={r.status}")
             r.raise_for_status()
             return await r.json()
+
+    @retry(stop=stop_after_attempt(settings.RETRY_MAX),
+           wait=wait_exponential_jitter(initial=settings.RETRY_BASE_DELAY, max=8))
+    async def ticker_price(self, symbol: str) -> float:
+        url = f"{self.base}/fapi/v1/ticker/price"
+        params = {"symbol": symbol}
+        async with self.session.get(url, params=params, timeout=settings.REQUEST_TIMEOUT) as r:
+            if r.status in (429, 418):
+                raise RuntimeError(f"binance_rate_limit status={r.status}")
+            r.raise_for_status()
+            data = await r.json()
+            return float(data["price"])

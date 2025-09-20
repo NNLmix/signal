@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     RETRY_MAX: int = 5
     RETRY_BASE_DELAY: float = 0.75
     DEDUP_TTL_SEC: int = 60 * 60 * 24  # 1 day
+        ATR_SL_MULT: float = 1.0
+        ATR_TP_MULT: float = 2.0
+        KEEPALIVE_SEC: int = 60
 
     model_config = SettingsConfigDict(
         env_file=None,

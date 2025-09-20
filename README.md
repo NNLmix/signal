@@ -29,3 +29,9 @@ Minimal, production-friendly refactor with:
 ## Run
 docker build -t signals .
 docker run -p 8000:8000 --env-file .env signals
+
+
+## Runtime behavior
+- Scans **every ~1 second** across configured pairs and all strategies.
+- Signals include **Entry/SL/TP** (ATR-based; fallback to 0.5%/1%).
+- A keepalive task pings `/healthz` every `KEEPALIVE_SEC` (default 60s) to keep the Koyeb instance warm.
