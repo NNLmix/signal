@@ -1,6 +1,5 @@
-from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import List
+from typing import List, Optional
 
 class Settings(BaseSettings):
     # Secrets (configure as Koyeb Secrets)
@@ -10,10 +9,13 @@ class Settings(BaseSettings):
     SUPABASE_SERVICE_KEY: str
     REDIS_URL: str
 
-    # Non-secrets
-    PUBLIC_URL: str
-    TELEGRAM_CHAT_ID: str
+    # Required non-secrets
     SUPABASE_URL: str
+    TELEGRAM_CHAT_ID: str
+
+    # Optional public URL (fallback to KOYEB_APP_URL)
+    PUBLIC_URL: Optional[str] = None
+    KOYEB_APP_URL: Optional[str] = None
 
     # Optional tuning
     BINANCE_BASE: str = "https://fapi.binance.com"

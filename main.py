@@ -13,10 +13,20 @@ worker_task = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging(settings.LOG_LEVEL)
-    # Set Telegram webhook to PUBLIC_URL/webhook
+
+    # Determine public URL
+    public_url = (settings.PUBLIC_URL or settings.KOYEB_APP_URL)
+    if public_url:
+        public_url = public_url.rstrip("/")
+    else:
+        print("WARN: No PUBLIC_URL or KOYEB_APP_URL set. Telegram webhook will NOT be configured; bot will not receive updates.")
+
+    # Telegram webhook lifecycle
     await bot.delete_webhook(drop_pending_updates=True)
     await asyncio.sleep(1.0)
-    await bot.set_webhook(f"{settings.PUBLIC_URL.rstrip('/')}/webhook")
+    if public_url:
+        await bot.set_webhook(f"{public_url}/webhook")
+
     # Start worker
     global worker_task
     worker_task = asyncio.create_task(run_worker(stop_event))
