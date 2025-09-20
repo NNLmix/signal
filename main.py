@@ -1,64 +1,35 @@
-import logging
 import asyncio
-import os
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
-from aiogram import Bot
-from aiogram.types import Update
-from bot import bot, dp
-from config import KOYEB_APP_URL, WEBHOOK_URL
+from fastapi import FastAPI
+from app.api import app as fastapi_app
+from app.telegram import bot
+from app.config import settings
+from app.logging import setup_logging
+from app.worker import run_worker
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+stop_event = asyncio.Event()
+worker_task = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Start/stop lifecycle for FastAPI which ensures the Telegram bot dispatcher
-    is running (either webhook or long polling). This keeps the process alive so
-    the Koyeb health checks won't see the container exit immediately.
-    """
-    polling_task = None
-    # Consider webhook enabled only if KOYEB_APP_URL is not the default placeholder
-    webhook_enabled = bool(KOYEB_APP_URL and "your-app.koyeb.app" not in KOYEB_APP_URL)
+    setup_logging(settings.LOG_LEVEL)
+    # Set Telegram webhook to PUBLIC_URL/webhook
+    await bot.delete_webhook(drop_pending_updates=True)
+    await asyncio.sleep(1.0)
+    await bot.set_webhook(f"{settings.PUBLIC_URL.rstrip('/')}/webhook")
+    # Start worker
+    global worker_task
+    worker_task = asyncio.create_task(run_worker(stop_event))
     try:
-        if webhook_enabled:
-            logger.info("Webhook mode enabled. Setting webhook to %s", WEBHOOK_URL)
-            try:
-                await bot.set_webhook(WEBHOOK_URL)
-            except Exception as e:
-                logger.exception("Failed to set webhook: %s", e)
-        else:
-            logger.info("Starting aiogram long polling in background task")
-            polling_task = asyncio.create_task(dp.start_polling())
         yield
     finally:
-        logger.info("Shutting down bot lifecycle")
-        try:
-            if webhook_enabled:
-                await bot.delete_webhook()
-        except Exception as e:
-            logger.exception("Error while deleting webhook: %s", e)
-        if polling_task:
-            polling_task.cancel()
-            try:
-                await polling_task
-            except asyncio.CancelledError:
-                logger.info("Polling task cancelled")
-        try:
-            await bot.session.close()
-        except Exception:
-            pass
+        stop_event.set()
+        if worker_task:
+            await worker_task
+        await bot.delete_webhook()
+        await bot.session.close()
 
 app = FastAPI(lifespan=lifespan)
 
-@app.post("/webhook")
-async def telegram_webhook(request: Request):
-    data = await request.json()
-    update = Update(**data)
-    Bot.set_current(bot)
-    try:
-        # process with aiogram v2 dispatcher
-        await dp.process_update(update)
-    except Exception as e:
-        logger.exception("Error processing update: %s", e)
-    return {"ok": True}
+# Mount routes
+app.mount("", fastapi_app)
