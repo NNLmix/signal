@@ -1,8 +1,11 @@
+import logging
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils.exceptions import Throttled
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 import asyncio
 from .config import settings
+
+log = logging.getLogger("telegram")
 
 bot = Bot(token=settings.TELEGRAM_BOT_TOKEN, parse_mode=types.ParseMode.HTML)
 dp = Dispatcher(bot, storage=MemoryStorage())

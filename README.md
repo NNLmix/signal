@@ -49,3 +49,13 @@ docker run -p 8000:8000 --env-file .env signals
 - If you see `SSL record layer failure`, you are likely using TLS against a non‑TLS port. Fix the URL/port. As a temporary workaround:
   - Set `REDIS_ALLOW_TLS_DOWNGRADE=true` (the client will retry without TLS)
   - Or set `REDIS_SSL_VERIFY=false` if you have a certificate chain issue (not recommended long-term).
+
+
+## Debugging signals
+- Watch logs for:
+  - `startup_health` → shows Redis / Supabase reachability, and BTC last price vs `TEST_SIGNAL_PRICE` if test strategy enabled.
+  - `strategy.signal` → number of signals produced by each strategy per loop.
+  - `dedup_result` → whether a signal was sent (`fresh=true`) or blocked as duplicate.
+  - `telegram.sent` / `telegram.send_error` → result of sending the message.
+- The test strategy only fires on **crossing above** the threshold (previous close ≤ threshold and last close > threshold).
+- To force a single test signal per deploy, leave `TEST_SIGNAL_ONCE=true` (default).

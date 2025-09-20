@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     # Test strategy controls
     TEST_SIGNAL_ENABLED: bool = True
     TEST_SIGNAL_PRICE: float = 110000.0
+        TEST_SIGNAL_ONCE: bool = True
 
     model_config = SettingsConfigDict(
         env_file=None,

@@ -51,5 +51,18 @@ async def run_startup_checks():
             return_exceptions=False
         )
     binance_res, supabase_res, redis_res = results
-    log.info("startup_health", extra={"binance": binance_res, "supabase": supabase_res, "redis": redis_res, "redis_url_scheme": "rediss" if settings.REDIS_URL.startswith("rediss://") else "redis", "redis_ssl_verify": settings.REDIS_SSL_VERIFY, "redis_tls_downgrade": settings.REDIS_ALLOW_TLS_DOWNGRADE})
+        # Extra: log BTC last price vs threshold if test strategy is enabled
+        btc_info = None
+        if getattr(settings, 'TEST_SIGNAL_ENABLED', False):
+            try:
+                async with aiohttp.ClientSession() as s2:
+                    from .services.binance import BinanceClient
+                    b2 = BinanceClient(settings.BINANCE_BASE, s2)
+                    await b2.sync_time()
+                    price_kl = await b2.klines("BTCUSDT", "1m", limit=1)
+                    last = float(price_kl[-1][4]) if price_kl else None
+                    btc_info = {"btc_last_price": last, "threshold": getattr(settings, 'TEST_SIGNAL_PRICE', None)}
+            except Exception as e:
+                btc_info = {"error": str(e)}
+    log.info("startup_health", extra={"binance": binance_res, "supabase": supabase_res, "redis": redis_res, "redis_url_scheme": "rediss" if settings.REDIS_URL.startswith("rediss://") else "redis", "redis_ssl_verify": settings.REDIS_SSL_VERIFY, "redis_tls_downgrade": settings.REDIS_ALLOW_TLS_DOWNGRADE, "test_signal": btc_info})
     return {"binance": binance_res, "supabase": supabase_res, "redis": redis_res}
