@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List, Optional
 
 class Settings(BaseSettings):
-    # Secrets (configure as Koyeb Secrets)
+    # Secrets (Koyeb Secrets)
     BINANCE_API_KEY: str
     BINANCE_API_SECRET: str
     TELEGRAM_BOT_TOKEN: str
@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     PUBLIC_URL: Optional[str] = None
     KOYEB_APP_URL: Optional[str] = None
 
-    # Optional tuning
+    # Tunables / defaults
     BINANCE_BASE: str = "https://fapi.binance.com"
     PAIRS: List[str] = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
     LTF: str = "5m"
@@ -35,10 +35,10 @@ class Settings(BaseSettings):
     REDIS_SSL_VERIFY: bool = True
     REDIS_ALLOW_TLS_DOWNGRADE: bool = False
 
-    # Test strategy controls
+    # Test-strategy controls
     TEST_SIGNAL_ENABLED: bool = True
     TEST_SIGNAL_PRICE: float = 110000.0
-        TEST_SIGNAL_ONCE: bool = True
+    TEST_SIGNAL_ONCE: bool = True
 
     model_config = SettingsConfigDict(
         env_file=None,
