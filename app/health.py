@@ -51,5 +51,5 @@ async def run_startup_checks():
             return_exceptions=False
         )
     binance_res, supabase_res, redis_res = results
-    log.info("startup_health", extra={"binance": binance_res, "supabase": supabase_res, "redis": redis_res})
+    log.info("startup_health", extra={"binance": binance_res, "supabase": supabase_res, "redis": redis_res, "redis_url_scheme": "rediss" if settings.REDIS_URL.startswith("rediss://") else "redis", "redis_ssl_verify": settings.REDIS_SSL_VERIFY, "redis_tls_downgrade": settings.REDIS_ALLOW_TLS_DOWNGRADE})
     return {"binance": binance_res, "supabase": supabase_res, "redis": redis_res}

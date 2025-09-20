@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     ATR_TP_MULT: float = 2.0
     KEEPALIVE_SEC: int = 60
 
+        # Redis TLS controls
+        REDIS_SSL_VERIFY: bool = True
+        REDIS_ALLOW_TLS_DOWNGRADE: bool = False
+
     # Test strategy controls
     TEST_SIGNAL_ENABLED: bool = True
     TEST_SIGNAL_PRICE: float = 110000.0

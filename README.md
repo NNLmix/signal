@@ -40,3 +40,12 @@ docker run -p 8000:8000 --env-file .env signals
 ### Test strategy
 - `btc_price_gt_threshold` (1m): Emits a **LONG** signal when BTCUSDT last close > `TEST_SIGNAL_PRICE` (default **110000.0**).
 - Toggle via `TEST_SIGNAL_ENABLED=true/false`. Override price with `TEST_SIGNAL_PRICE`.
+
+
+## Redis TLS notes
+- Use the exact endpoint/port shown in Redis Cloud:
+  - **TLS endpoint** → `rediss://` + TLS port
+  - **Non-TLS endpoint** → `redis://` + non-TLS port
+- If you see `SSL record layer failure`, you are likely using TLS against a non‑TLS port. Fix the URL/port. As a temporary workaround:
+  - Set `REDIS_ALLOW_TLS_DOWNGRADE=true` (the client will retry without TLS)
+  - Or set `REDIS_SSL_VERIFY=false` if you have a certificate chain issue (not recommended long-term).
