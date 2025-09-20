@@ -1,90 +1,53 @@
-# redis_client.py - enhanced status checking and logging
-import logging
-import os
-import asyncio
-import ssl
+"""
+redis_client.py - lightweight TCP connectivity checker for Redis/Rediss URLs.
+Does not depend on redis library; suitable for diagnostics.
+"""
+import os, asyncio, ssl, logging
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
-
-REDIS_URL = os.environ.get("REDIS_URL")
-
+REDIS_URL = os.environ.get("REDIS_URL", "")
 
 def _host_port_tls_from_url(url):
     if not url:
-        return ("unknown", 0, False)
+        return ("", 0, False)
+    p = urlparse(url)
+    host = p.hostname or ""
+    port = p.port or (6380 if p.scheme == "rediss" else 6379)
+    tls = p.scheme == "rediss"
+    return host, port, tls
+
+async def check_redis(timeout=3.0):
+    host, port, tls = _host_port_tls_from_url(REDIS_URL)
+    info = {"available": False, "host": host, "port": port, "tls": tls, "error": ""}
+    if not host:
+        info["error"] = "missing REDIS_URL"
+        return info
     try:
-        p = urlparse(url)
-        host = p.hostname or "unknown"
-        port = p.port or 0
-        tls = p.scheme.startswith("rediss")
-        return (host, port, tls)
-    except Exception as e:
-        logger.exception("redis.url.parse.error %s", e)
-        return ("unknown", 0, False)
-
-
-async def check_redis(timeout: float = 2.0):
-    """
-    Return a dict with detailed Redis connectivity info:
-    {
-        available: bool,
-        host,
-        port,
-        tls,
-        error: optional string
-    }
-    This function logs exceptions with stack traces for diagnosis.
-    """
-    # Ensure TLS scheme if missing
-    url = REDIS_URL
-    if url and url.startswith("redis://"):
-        url = url.replace("redis://", "rediss://", 1)
-
-    host, port, tls = _host_port_tls_from_url(url)
-    info = {"available": False, "host": host, "port": port, "tls": tls, "error": None}
-
-    try:
-        import redis.asyncio as aioredis
-
-        ssl_context = None
         if tls:
-            ssl_context = ssl.create_default_context()
-
-        client = aioredis.from_url(
-            url,
-            socket_connect_timeout=timeout,
-            socket_timeout=timeout,
-            ssl=tls,
-            ssl_context=ssl_context,
-            decode_responses=True,
-        )
-
-        pong = await client.ping()
-        if pong is True or pong == b"PONG":
-            info["available"] = True
-        await client.close()
-
-    except Exception as e:
-        # Fallback: attempt a simple TCP connect to the host:port
-        import socket
-
-        logger.exception("redis.asyncio.ping.failed %s", e)
-        info["error"] = str(e)
+            sslctx = ssl.create_default_context()
+            reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port, ssl=sslctx), timeout=timeout)
+        else:
+            reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout)
+        # minimal check: send Redis PING using RESP protocol and read reply
+        writer.write(b"*1\r\n$4\r\nPING\r\n")
+        await writer.drain()
+        data = await asyncio.wait_for(reader.read(100), timeout=timeout)
+        writer.close()
         try:
-            with socket.create_connection((host, port), timeout=timeout):
-                pass
-        except Exception as se:
-            logger.exception("redis.tcp.connect.failed %s", se)
-            if not info["error"]:
-                info["error"] = str(se)
-
+            await writer.wait_closed()
+        except Exception:
+            pass
+        data = data.decode(errors='ignore') if data else ""
+        if "+PONG" in data or "PONG" in data:
+            info["available"] = True
+        else:
+            info["error"] = f"unexpected_reply:{data[:200]}"
+    except Exception as e:
+        logger.warning("redis.check failed %s", e)
+        info["error"] = str(e)
     return info
 
-
 if __name__ == "__main__":
-    async def main():
-        result = await check_redis()
-        print(result)
-
-    asyncio.run(main())
+    import asyncio
+    print(asyncio.run(check_redis()))
