@@ -35,3 +35,8 @@ docker run -p 8000:8000 --env-file .env signals
 - Scans **every ~1 second** across configured pairs and all strategies.
 - Signals include **Entry/SL/TP** (ATR-based; fallback to 0.5%/1%).
 - A keepalive task pings `/healthz` every `KEEPALIVE_SEC` (default 60s) to keep the Koyeb instance warm.
+
+
+### Test strategy
+- `btc_price_gt_threshold` (1m): Emits a **LONG** signal when BTCUSDT last close > `TEST_SIGNAL_PRICE` (default **110000.0**).
+- Toggle via `TEST_SIGNAL_ENABLED=true/false`. Override price with `TEST_SIGNAL_PRICE`.

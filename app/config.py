@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     ATR_SL_MULT: float = 1.0
     ATR_TP_MULT: float = 2.0
     KEEPALIVE_SEC: int = 60
+        TEST_SIGNAL_ENABLED: bool = True
+        TEST_SIGNAL_PRICE: float = 110000.0
 
     model_config = SettingsConfigDict(
         env_file=None,
