@@ -1,6 +1,7 @@
 import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+import logging
 from app.api import app as fastapi_app
 from app.telegram import bot
 from app.config import settings
@@ -14,14 +15,17 @@ worker_task = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging(settings.LOG_LEVEL)
+    # Detect and log public IP for whitelisting
     try:
-        import logging
         log = logging.getLogger('startup')
         ip = await get_public_ip()
         log.info('public_ip', extra={'ip': ip})
+    except Exception as e:
+        logging.getLogger('startup').warning('public_ip_error', extra={'error': str(e)})
+
     # Fetch and log current futures prices for configured pairs
     try:
-        import logging, aiohttp
+        import aiohttp
         from app.services.binance import BinanceClient
         prices = {}
         async with aiohttp.ClientSession() as _s:
@@ -35,10 +39,7 @@ async def lifespan(app: FastAPI):
         logging.getLogger('startup').info('futures_prices', extra={'prices': prices})
     except Exception as e:
         logging.getLogger('startup').warning('futures_prices_error', extra={'error': str(e)})
-    except Exception as e:
-        logging.getLogger('startup').warning('public_ip_error', extra={'error': str(e)})
 
-    # Determine public URL
     public_url = (settings.PUBLIC_URL or settings.KOYEB_APP_URL)
     if public_url:
         public_url = public_url.rstrip("/")
