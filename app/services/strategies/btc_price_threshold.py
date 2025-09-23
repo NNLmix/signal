@@ -6,17 +6,20 @@ class Strategy:
     timeframe = "1m"
     _emitted_once: bool = False  # class-level, one-shot per process/deploy
 
-    def run(self, symbol: str, klines: List[List[Any]]) -> Optional[Dict[str, Any]]:
+    def run(self, klines: List[List[Any]], symbol: str) -> List[Dict[str, Any]]:
         """
-        One-time test signal per deploy if last price > TEST_SIGNAL_PRICE.
+        One-time BTC test signal per deploy if last price > TEST_SIGNAL_PRICE.
         Emits LONG with simple SL/TP bands for visibility.
+        Returns a list (empty or with a single dict) to match engine expectations.
         """
         if not settings.TEST_SIGNAL_ENABLED:
-            return None
+            return []
+        if symbol != "BTCUSDT":
+            return []
         if Strategy._emitted_once:
-            return None
+            return []
         if not klines:
-            return None
+            return []
 
         last_close = float(klines[-1][4])
         thr = float(settings.TEST_SIGNAL_PRICE)
@@ -26,7 +29,7 @@ class Strategy:
             sl = round(entry * 0.98, 2)   # -2%
             tp = round(entry * 1.02, 2)   # +2%
             Strategy._emitted_once = True
-            return {
+            return [{
                 "symbol": symbol,
                 "side": "LONG",
                 "reason": f"TEST one-shot: price {last_close} > threshold {thr}",
@@ -35,5 +38,5 @@ class Strategy:
                 "sl": sl,
                 "tp": tp,
                 "timeframe": self.timeframe,
-            }
-        return None
+            }]
+        return []
