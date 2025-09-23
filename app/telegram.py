@@ -1,4 +1,5 @@
 import logging
+log = logging.getLogger('telegram')
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils.exceptions import Throttled
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
@@ -21,5 +22,6 @@ async def send_signal_message(text: str):
         delta = now - _last_sent
         if delta < _min_interval:
             await asyncio.sleep(_min_interval - delta)
-        await bot.send_message(chat_id=settings.TELEGRAM_CHAT_ID, text=text, disable_web_page_preview=True)
+        log.info('telegram_send', extra={'chat_id': settings.TELEGRAM_CHAT_ID});
+    await bot.send_message(chat_id=settings.TELEGRAM_CHAT_ID, text=text, disable_web_page_preview=True)
         _last_sent = asyncio.get_event_loop().time()

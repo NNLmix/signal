@@ -6,6 +6,7 @@ from app.telegram import bot
 from app.config import settings
 from app.logging import setup_logging
 from app.worker import run_worker
+from app.utils import get_public_ip
 
 stop_event = asyncio.Event()
 worker_task = None
@@ -13,6 +14,14 @@ worker_task = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging(settings.LOG_LEVEL)
+    # Detect and log public IP for whitelisting
+    try:
+        import logging
+        log = logging.getLogger('startup')
+        ip = await get_public_ip()
+        log.info('public_ip', extra={'ip': ip})
+    except Exception as e:
+        logging.getLogger('startup').warning('public_ip_error', extra={'error': str(e)})
 
     # Determine public URL
     public_url = (settings.PUBLIC_URL or settings.KOYEB_APP_URL)

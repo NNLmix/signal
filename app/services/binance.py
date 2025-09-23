@@ -1,8 +1,10 @@
+import logging
 import aiohttp
 import time
 from typing import Any, List
 from tenacity import retry, stop_after_attempt, wait_exponential_jitter
 from ..config import settings
+log = logging.getLogger('binance')
 
 class BinanceClient:
     def __init__(self, base: str, session: aiohttp.ClientSession):
@@ -11,10 +13,12 @@ class BinanceClient:
         self._time_offset_ms = 0
 
     async def sync_time(self):
+        start = time.time(); log.info('binance_sync_time_start', extra={'url': f'{self.base}/fapi/v1/time'})
         url = f"{self.base}/fapi/v1/time"
         async with self.session.get(url, timeout=settings.REQUEST_TIMEOUT) as r:
             r.raise_for_status()
             data = await r.json()
+            log.info('binance_sync_time_ok', extra={'delta_ms': data.get('serverTime', 0) - int(time.time()*1000), 'status': r.status, 'elapsed_ms': int((time.time()-start)*1000)})
             server_time = int(data["serverTime"])
             local = int(time.time() * 1000)
             self._time_offset_ms = server_time - local
@@ -43,4 +47,5 @@ class BinanceClient:
                 raise RuntimeError(f"binance_rate_limit status={r.status}")
             r.raise_for_status()
             data = await r.json()
+            log.info('binance_sync_time_ok', extra={'delta_ms': data.get('serverTime', 0) - int(time.time()*1000), 'status': r.status, 'elapsed_ms': int((time.time()-start)*1000)})
             return float(data["price"])

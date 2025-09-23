@@ -1,9 +1,12 @@
+import logging
 import redis.asyncio as redis
 from typing import Any, Dict
 from ..config import settings
+log = logging.getLogger("redis")
 
 class RedisClient:
     def __init__(self):
+        log.info('redis_init_start')
         self.url = settings.REDIS_URL
         kwargs = {"decode_responses": True}
         if self.url.startswith("rediss://"):
