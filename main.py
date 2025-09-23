@@ -23,7 +23,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logging.getLogger('startup').warning('public_ip_error', extra={'error': str(e)})
 
-    # Fetch and log current futures prices for configured pairs
+    # Fetch and log current futures prices for configured
     try:
         import aiohttp
         from app.services.binance import BinanceClient
