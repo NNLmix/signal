@@ -1,36 +1,40 @@
-from typing import List, Dict, Any
-from ..indicators import close_prices
+from typing import Dict, Any, List, Optional
 from ...config import settings
 
-class Strategy:
-    name = "btc_price_gt_threshold"
-    timeframe = "1m"  # frequent checks
+_emitted_once = False  # one-shot per process/deploy
 
-    # once-per-process flag
-    _sent_once: bool = False
+def run(symbol: str, klines: List[List[Any]]) -> Optional[Dict[str, Any]]:
+    """
+    One-time test signal per deploy if last price > TEST_SIGNAL_PRICE.
+    Emits LONG with simple SL/TP bands for visibility.
+    """
+    global _emitted_once
+    if not settings.TEST_SIGNAL_ENABLED:
+        return None
+    if _emitted_once:
+        return None
 
-    def run(self, klines: List[List[Any]], symbol: str) -> List[Dict[str, Any]]:
-        if not settings.TEST_SIGNAL_ENABLED:
-            return []
-        if symbol != "BTCUSDT":
-            return []
-        closes = close_prices(klines)
-        if len(closes) < 2:
-            return []
-        prev_close, last_close = closes[-2], closes[-1]
-        thr = settings.TEST_SIGNAL_PRICE
+    if not klines:
+        return None
 
-        # only when price crosses above threshold (no spam)
-        crossed_up = prev_close <= thr and last_close > thr
+    last_close = float(klines[-1][4])
+    thr = float(settings.TEST_SIGNAL_PRICE)
 
-        if settings.TEST_SIGNAL_ONCE and self._sent_once:
-            return []
-        if crossed_up:
-            if settings.TEST_SIGNAL_ONCE:
-                self._sent_once = True
-            return [{
-                "side": "LONG",
-                "reason": f"CrossUp>{thr}",
-                "symbol": symbol
-            }]
-        return []
+    if last_close > thr:
+        # Construct a simple test payload. (No crossing, just current > threshold)
+        entry = last_close
+        sl = round(entry * 0.98, 2)   # -2% for visibility
+        tp = round(entry * 1.02, 2)   # +2% for visibility
+        _emitted_once = True
+        return {
+            "symbol": symbol,
+            "side": "LONG",
+            "reason": f"TEST one-shot: price {last_close} > threshold {thr}",
+            "strategy": "btc_price_gt_threshold",
+            "entry": entry,
+            "sl": sl,
+            "tp": tp,
+            "timeframe": "1m",
+        }
+
+    return None
