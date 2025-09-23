@@ -20,6 +20,22 @@ async def lifespan(app: FastAPI):
         log = logging.getLogger('startup')
         ip = await get_public_ip()
         log.info('public_ip', extra={'ip': ip})
+    # Fetch and log current futures prices for configured pairs
+    try:
+        import logging, aiohttp
+        from app.services.binance import BinanceClient
+        prices = {}
+        async with aiohttp.ClientSession() as _s:
+            b = BinanceClient(settings.BINANCE_BASE, _s)
+            await b.sync_time()
+            for sym in settings.PAIRS:
+                try:
+                    prices[sym] = await b.ticker_price(sym)
+                except Exception as e:
+                    prices[sym] = f'error: {e}'
+        logging.getLogger('startup').info('futures_prices', extra={'prices': prices})
+    except Exception as e:
+        logging.getLogger('startup').warning('futures_prices_error', extra={'error': str(e)})
     except Exception as e:
         logging.getLogger('startup').warning('public_ip_error', extra={'error': str(e)})
 
