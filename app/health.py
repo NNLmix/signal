@@ -27,7 +27,6 @@ async def check_supabase(session: aiohttp.ClientSession) -> Dict[str, Any]:
     }
     try:
         async with session.get(url, headers=headers, timeout=10) as r:
-            # Consider anything under 500 as "reachable"
             ok = r.status < 500
             text = await r.text()
             return {"ok": ok, "status": r.status, "url": url, "note": "reachable" if ok else text[:200]}
