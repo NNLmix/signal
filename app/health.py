@@ -12,7 +12,6 @@ async def check_binance(session: aiohttp.ClientSession) -> Dict[str, Any]:
     client = BinanceClient(settings.BINANCE_BASE, session)
     try:
         await client.sync_time()
-        # lightweight call: request 1 recent kline for BTCUSDT 1m to verify data path
         kl = await client.klines("BTCUSDT", "1m", limit=1)
         return {"ok": True, "endpoint": settings.BINANCE_BASE, "klines_ok": bool(kl)}
     except Exception as e:
