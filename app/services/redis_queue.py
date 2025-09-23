@@ -35,8 +35,9 @@ class RedisClient:
             res = await self.r.set(key, "1", ex=ttl, nx=True)
             return bool(res)
         except Exception as e:
-            # Best-effort: don't crash the worker on Redis errors
-            return False
+            # Fail-open on Redis errors so signals still flow
+            log.error('redis_dedup_error', extra={'err': str(e)})
+            return True
 
     async def cache_set(self, key: str, value: str, ttl: int = 300):
         try:

@@ -74,6 +74,7 @@ async def run_worker(stop_event: asyncio.Event):
                                 text = format_signal_text(sig, last_close, sl, tp, strat.name, strat.timeframe)
                                 dedup_key = make_dedup_key(sig, strat.name, last_close, sl, tp)
                                 fresh = await redis.dedup_try_set(dedup_key, settings.DEDUP_TTL_SEC)
+                                log.info('dedup_check', extra={'key': dedup_key, 'fresh': bool(fresh)})
                                 if not fresh:
                                     continue
 

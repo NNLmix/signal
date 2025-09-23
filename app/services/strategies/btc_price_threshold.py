@@ -25,6 +25,8 @@ class Strategy:
         thr = float(settings.TEST_SIGNAL_PRICE)
 
         if last_close > thr:
+            import logging
+            logging.getLogger('strategy_test').info('test_emit', extra={'symbol': symbol, 'price': last_close, 'thr': thr})
             entry = last_close
             sl = round(entry * 0.98, 2)   # -2%
             tp = round(entry * 1.02, 2)   # +2%
