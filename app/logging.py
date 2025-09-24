@@ -27,3 +27,14 @@ def setup_logging(level: str = "INFO"):
     root = logging.getLogger()
     root.setLevel(level.upper())
     root.handlers = [handler]
+
+
+# Fallback: initialize logging on import if nothing configured (safe for local tests)
+try:
+    if not logging.getLogger().handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(JsonFormatter())
+        logging.getLogger().addHandler(handler)
+        logging.getLogger().setLevel(logging.INFO)
+except Exception:
+    pass
