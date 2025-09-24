@@ -2,6 +2,9 @@ import asyncio, hashlib
 from typing import Dict, List
 import aiohttp
 import logging
+from datetime import datetime
+from dateutil import tz
+
 from .config import settings
 from .services.binance import BinanceClient
 from .services.redis_queue import RedisClient
@@ -12,108 +15,119 @@ from .telegram import send_signal_message
 
 log = logging.getLogger("worker")
 
+NY_TZ = tz.gettz("America/New_York")
+UA_TZ = tz.gettz("Europe/Kyiv")
+
+def _fmt_entry_time(ts_ms: int | None) -> str:
+    if not ts_ms:
+        return "—"
+    dt_utc = datetime.utcfromtimestamp(ts_ms/1000).replace(tzinfo=tz.UTC)
+    dt_ny  = dt_utc.astimezone(NY_TZ)
+    dt_ua  = dt_utc.astimezone(UA_TZ)
+    return f"{dt_ny:%H:%M} NY | {dt_ua:%H:%M} Kyiv ({dt_ua:%d %b})"
+
+def _dedup_key(symbol: str, strat_name: str, side: str, candle_close_ms: int | None) -> str:
+    base = f"{symbol}|{strat_name}|{side}|{candle_close_ms or ''}"
+    return "sig:" + hashlib.sha1(base.encode()).hexdigest()
+
 async def run_worker(stop_event: asyncio.Event):
-    redis = RedisClient()
+    redis = RedisClient(url=settings.REDIS_URL, allow_tls_downgrade=getattr(settings, "REDIS_ALLOW_TLS_DOWNGRADE", False))
+    supa = SupabaseClient(base_url=settings.SUPABASE_URL, service_key=settings.SUPABASE_SERVICE_KEY)
+    binance = BinanceClient(api_key=settings.BINANCE_API_KEY, api_secret=settings.BINANCE_API_SECRET)
+
+    pairs: List[str] = getattr(settings, "PAIRS", ["BTCUSDT"])
+
     async with aiohttp.ClientSession() as session:
-        supa = SupabaseClient(session)
-        binance = BinanceClient(settings.BINANCE_BASE, session)
-        await binance.sync_time()
-
-        # Preload klines for each symbol/timeframe once
-        kline_cache: Dict[str, Dict[str, List[list]]] = {s: {} for s in settings.PAIRS}
-
-        # Warm-up klines
-        for symbol in settings.PAIRS:
-            for strat in STRATEGIES:
-                try:
-                    kline_cache[symbol][strat.timeframe] = await binance.klines(symbol, strat.timeframe, limit=200)
-                    await asyncio.sleep(0.1)
-                except Exception as e:
-                    log.error("warmup_error", extra={"symbol": symbol, "tf": strat.timeframe, "err": str(e)})
-
-        # Two background tasks: 1) keepalive pings 2) main per-second loop
         keepalive_task = asyncio.create_task(_keepalive_loop(session, stop_event))
         try:
             while not stop_event.is_set():
-                loop_start = asyncio.get_event_loop().time()
-
-                for symbol in settings.PAIRS:
-                    for strat in STRATEGIES:
+                for strat in STRATEGIES:
+                    tf = getattr(strat, "timeframe", "5m")
+                    for symbol in pairs:
                         try:
-                            # Refresh last candle cheaply: request small limit
-                            kl = await binance.klines(symbol, strat.timeframe, limit=200)
-                            kline_cache[symbol][strat.timeframe] = kl
-
-                            signals = strat.run(kl, symbol)
-                            if not signals:
+                            kl = await binance.get_klines(symbol, tf, limit=300)
+                            if not kl or len(kl) < 3:
                                 continue
+                            signals = strat.run(kl, symbol) or []
 
-                            # Precompute ATR for SL/TP
+                            # Precompute ATR for fallback SL/TP
                             atr_vals = atr(kl, period=14)
                             last_atr = atr_vals[-1] if atr_vals and atr_vals[-1] is not None else None
                             last_close = float(kl[-1][4])
+                            last_close_ms = int(kl[-1][6])
 
                             for sig in signals:
-                                # Attach entry/SL/TP
-                                if last_atr:
-                                    if sig["side"] == "LONG":
-                                        sl = last_close - settings.ATR_SL_MULT * last_atr
-                                        tp = last_close + settings.ATR_TP_MULT * last_atr
-                                    else:
-                                        sl = last_close + settings.ATR_SL_MULT * last_atr
-                                        tp = last_close - settings.ATR_TP_MULT * last_atr
-                                else:
-                                    # Fallback fixed 0.5% / 1%
-                                    if sig["side"] == "LONG":
-                                        sl = last_close * 0.995
-                                        tp = last_close * 1.01
-                                    else:
-                                        sl = last_close * 1.005
-                                        tp = last_close * 0.99
+                                side = sig.get("side")
+                                if side not in ("LONG", "SHORT"):
+                                    continue
 
-                                text = format_signal_text(sig, last_close, sl, tp, strat.name, strat.timeframe)
-                                dedup_key = make_dedup_key(sig, strat.name, last_close, sl, tp)
-                                fresh = await redis.dedup_try_set(dedup_key, settings.DEDUP_TTL_SEC)
-                                log.info('dedup_check', extra={'key': dedup_key, 'fresh': bool(fresh)})
+                                entry = sig.get("entry", last_close)
+                                sl = sig.get("sl")
+                                tp = sig.get("tp")
+
+                                if sl is None or tp is None:
+                                    if last_atr:
+                                        mult_sl = getattr(settings, "ATR_SL_MULT", 1.0)
+                                        mult_tp = getattr(settings, "ATR_TP_MULT", 2.0)
+                                        if side == "LONG":
+                                            sl = entry - mult_sl * last_atr
+                                            tp = entry + mult_tp * last_atr
+                                        else:
+                                            sl = entry + mult_sl * last_atr
+                                            tp = entry - mult_tp * last_atr
+                                    else:
+                                        # fallback static 0.5% / 1%
+                                        if side == "LONG":
+                                            sl = entry * 0.995
+                                            tp = entry * 1.01
+                                        else:
+                                            sl = entry * 1.005
+                                            tp = entry * 0.99
+
+                                entry_time_ms = sig.get("entry_time_ms", last_close_ms)
+
+                                # Dedup per symbol/strategy/side/candle
+                                key = _dedup_key(sig.get("symbol", symbol), getattr(strat, "name", "unknown"), side, entry_time_ms)
+                                fresh = await redis.try_set(key, getattr(settings, "DEDUP_TTL_SEC", 3600))
                                 if not fresh:
                                     continue
 
+                                # Persist
                                 await supa.insert_signal({
-                                    "symbol": sig["symbol"],
-                                    "side": sig["side"],
-                                    "reason": sig["reason"],
-                                    "strategy": strat.name,
-                                    "entry": last_close,
+                                    "symbol": sig.get("symbol", symbol),
+                                    "side": side,
+                                    "reason": sig.get("reason", ""),
+                                    "strategy": getattr(strat, "name", ""),
+                                    "timeframe": tf,
+                                    "entry": entry,
                                     "sl": sl,
                                     "tp": tp,
-                                    "timeframe": strat.timeframe,
+                                    "entry_time_ms": entry_time_ms,
                                 })
-                                await send_signal_message(text)
-                        except Exception as e:
-                            log.error("loop_error", extra={"symbol": symbol, "strategy": strat.name, "err": str(e)})
-                        await asyncio.sleep(0.05)  # tiny pacing between calls
 
-                # Maintain ~1s cadence per full sweep (subject to rate limits)
-                elapsed = asyncio.get_event_loop().time() - loop_start
-                sleep_left = max(0, 1.0 - elapsed)
-                await asyncio.sleep(sleep_left)
+                                # Message text
+                                rr = abs((tp - entry) / (entry - sl)) if (entry != sl) else 0.0
+                                side_emoji = "🟢 LONG" if side == "LONG" else "🔴 SHORT"
+                                lines = [
+                                    f"<b>{side_emoji} {sig.get('symbol', symbol)}</b>",
+                                    f"⏱ Entry time: { _fmt_entry_time(entry_time_ms) }",
+                                    f"📈 Entry: <b>{entry:.4f}</b>",
+                                    f"🎯 TP: {tp:.4f}   🛡 SL: {sl:.4f}   R:R <b>{rr:.2f}</b>",
+                                    f"🧠 {getattr(strat, 'name', '')} · {tf}",
+                                ]
+                                rsn = sig.get("reason")
+                                if rsn:
+                                    lines.append(f"📝 {rsn}")
+                                await send_signal_message("\n".join(lines))
+
+                        except Exception as e:
+                            log.exception("strategy_loop_error", extra={"strategy": getattr(strat, "name", ""), "symbol": symbol})
+
+                await asyncio.sleep(getattr(settings, "POLL_INTERVAL_SEC", 5.0))
         finally:
             keepalive_task.cancel()
             with contextlib.suppress(Exception):
                 await keepalive_task
-
-def make_dedup_key(sig: dict, strategy: str, entry: float, sl: float, tp: float) -> str:
-    payload = f"{sig['symbol']}|{strategy}|{sig['side']}|{sig.get('reason','')}|{entry:.4f}|{sl:.4f}|{tp:.4f}"
-    return "dedup:signal:" + hashlib.sha1(payload.encode()).hexdigest()
-
-def format_signal_text(sig: dict, entry: float, sl: float, tp: float, strategy: str, timeframe: str) -> str:
-    return (
-        f"<b>{sig['symbol']}</b> - <b>{sig['side']}</b>\n"
-        f"TF: <code>{timeframe}</code> | Strategy: <code>{strategy}</code>\n"
-        f"Entry: <code>{entry:.4f}</code>\n"
-        f"SL: <code>{sl:.4f}</code> | TP: <code>{tp:.4f}</code>\n"
-        f"Reason: {sig.get('reason','')}"
-    )
 
 import contextlib
 async def _keepalive_loop(session: aiohttp.ClientSession, stop_event: asyncio.Event):
@@ -128,4 +142,4 @@ async def _keepalive_loop(session: aiohttp.ClientSession, stop_event: asyncio.Ev
                 _ = await r.text()
         except Exception:
             pass
-        await asyncio.sleep(settings.KEEPALIVE_SEC)
+        await asyncio.sleep(getattr(settings, "KEEPALIVE_SEC", 60))

@@ -35,7 +35,19 @@ class Settings(BaseSettings):
     REDIS_SSL_VERIFY: bool = True
     REDIS_ALLOW_TLS_DOWNGRADE: bool = False
 
-    # Test-strategy controls
+
+# Strategy toggles (enable/disable per strategy by name)
+# Names must match Strategy.name values
+STRATEGY_TOGGLES: dict = {
+    "btc_price_gt_threshold": True,
+    "trend_pullback_5m": True,
+    "four_hour_reentry_5m": True,
+}
+
+# Default pairs universe
+PAIRS: list[str] = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+
+# Test-strategy controls
     TEST_SIGNAL_ENABLED: bool = True
     TEST_SIGNAL_PRICE: float = 110000.0
     TEST_SIGNAL_ONCE: bool = True
