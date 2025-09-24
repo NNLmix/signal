@@ -55,10 +55,12 @@ class RedisClient:
         try:
             return await self.r.rpop("signals:outgoing")
         except Exception:
-            return None\n\nasync def try_set(self, key: str, ttl: int = 3600) -> bool:
+            return None
+
+    async def try_set(self, key: str, ttl: int = 3600) -> bool:
         try:
             if await self.r.set(name=key, value="1", ex=ttl, nx=True):
                 return True
             return False
         except Exception:
-            return False\n
+            return False
