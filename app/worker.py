@@ -31,14 +31,13 @@ def _dedup_key(symbol: str, strat_name: str, side: str, candle_close_ms: int | N
     return "sig:" + hashlib.sha1(base.encode()).hexdigest()
 
 async def run_worker(stop_event: asyncio.Event):
-    redis = RedisClient(url=settings.REDIS_URL, allow_tls_downgrade=getattr(settings, "REDIS_ALLOW_TLS_DOWNGRADE", False))
-    supa = SupabaseClient(base_url=settings.SUPABASE_URL, service_key=settings.SUPABASE_SERVICE_KEY)
-    binance = BinanceClient(api_key=settings.BINANCE_API_KEY, api_secret=settings.BINANCE_API_SECRET)
-
+    redis = RedisClient())
+    supa = SupabaseClient(session)
+    
     pairs: List[str] = getattr(settings, "PAIRS", ["BTCUSDT"])
 
     async with aiohttp.ClientSession() as session:
-        keepalive_task = asyncio.create_task(_keepalive_loop(session, stop_event))
+                        keepalive_task = asyncio.create_task(_keepalive_loop(session, stop_event))
         try:
             while not stop_event.is_set():
                 for strat in STRATEGIES:
