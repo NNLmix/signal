@@ -30,9 +30,9 @@ class Settings(BaseSettings):
     # Dedup TTL (seconds)
     DEDUP_TTL_SEC: int = 3600
 
-        # Network retry knobs
-        RETRY_MAX: int = 3
-        RETRY_BASE_DELAY: float = 0.2
+    # Network retry knobs (used by Binance client)
+    RETRY_MAX: int = 3
+    RETRY_BASE_DELAY: float = 0.2
 
     # Redis TLS knobs
     REDIS_SSL_VERIFY: bool = True
