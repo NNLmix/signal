@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 class Settings(BaseSettings):
     # Secrets (Koyeb Secrets)
@@ -17,37 +17,35 @@ class Settings(BaseSettings):
     PUBLIC_URL: Optional[str] = None
     KOYEB_APP_URL: Optional[str] = None
 
-    # Tunables / defaults
-    BINANCE_BASE: str = "https://fapi.binance.com"
-    PAIRS: List[str] = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
-    LTF: str = "5m"
-    HTF: str = "1h"
-    LOG_LEVEL: str = "INFO"
-    REQUEST_TIMEOUT: float = 10.0
-    RETRY_MAX: int = 5
-    RETRY_BASE_DELAY: float = 0.75
-    DEDUP_TTL_SEC: int = 60 * 60 * 24  # 1 day
-    ATR_SL_MULT: float = 1.0
-    ATR_TP_MULT: float = 2.0
+    # Polling cadence
+    POLL_INTERVAL_SEC: float = 5.0
+
+    # Keepalive ping
     KEEPALIVE_SEC: int = 60
 
-    # Redis TLS controls
+    # ATR risk params (fallback when a strategy doesn't provide SL/TP)
+    ATR_SL_MULT: float = 1.0
+    ATR_TP_MULT: float = 2.0
+
+    # Dedup TTL (seconds)
+    DEDUP_TTL_SEC: int = 3600
+
+    # Redis TLS knobs
     REDIS_SSL_VERIFY: bool = True
     REDIS_ALLOW_TLS_DOWNGRADE: bool = False
 
+    # Strategy toggles (enable/disable per strategy by name)
+    # Names must match Strategy.name values
+    STRATEGY_TOGGLES: Dict[str, bool] = {
+        "btc_price_gt_threshold": True,
+        "trend_pullback_5m": True,
+        "four_hour_reentry_5m": True,
+    }
 
-# Strategy toggles (enable/disable per strategy by name)
-# Names must match Strategy.name values
-STRATEGY_TOGGLES: dict = {
-    "btc_price_gt_threshold": True,
-    "trend_pullback_5m": True,
-    "four_hour_reentry_5m": True,
-}
+    # Default pairs universe
+    PAIRS: List[str] = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 
-# Default pairs universe
-PAIRS: list[str] = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
-
-# Test-strategy controls
+    # Test-strategy controls
     TEST_SIGNAL_ENABLED: bool = True
     TEST_SIGNAL_PRICE: float = 110000.0
     TEST_SIGNAL_ONCE: bool = True
