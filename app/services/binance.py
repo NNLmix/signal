@@ -27,7 +27,7 @@ class BinanceClient:
         url = f"{self.base}/fapi/v1/klines"
         params = {"symbol": symbol, "interval": interval, "limit": limit}
         t0 = time.time()
-        async with self.session.get(url, params=params, timeout=settings.REQUEST_TIMEOUT) as r:
+        async with self.session.get(url, params=params, timeout=getattr(settings, 'REQUEST_TIMEOUT', 10)) as r:
             if r.status in (429, 418):
                 # Surface rate limiting to tenacity
                 raise RuntimeError(f"binance_rate_limit status={r.status}")
@@ -44,7 +44,7 @@ class BinanceClient:
         url = f"{self.base}/fapi/v1/ticker/price"
         params = {"symbol": symbol}
         t0 = time.time()
-        async with self.session.get(url, params=params, timeout=settings.REQUEST_TIMEOUT) as r:
+        async with self.session.get(url, params=params, timeout=getattr(settings, 'REQUEST_TIMEOUT', 10)) as r:
             r.raise_for_status()
             data = await r.json()
             price = float(data.get("price", 0.0))

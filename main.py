@@ -4,6 +4,11 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
+def _env_true(name: str) -> bool:
+    v = os.getenv(name, '')
+    return v.strip().lower() in ('1','true','yes','on')
+
+
 # Optional imports guarded to avoid ImportError at import time
 try:
     from app.api import app as api_app  # type: ignore
@@ -98,19 +103,20 @@ async def lifespan(app: FastAPI):
                 log.warning("test_message_skip_no_creds")
                 return
 
-            # Deduplicate via Redis if available
+            # Deduplicate via Redis if available, but bypass if TEST_SIGNAL_ENABLED=true
             should_send = True
-            try:
-                from app.services.redis_queue import RedisClient  # type: ignore
-                rc = RedisClient()
-                if not await rc.try_set("test:startup:sent", ttl=24*3600):
-                    should_send = False
-            except Exception:
-                # If Redis not available, send once per process
-                if hasattr(_send_test_message, "_did"):
-                    should_send = False
-                else:
-                    _send_test_message._did = True  # type: ignore
+            if not _env_true("TEST_SIGNAL_ENABLED"):
+                try:
+                    from app.services.redis_queue import RedisClient  # type: ignore
+                    rc = RedisClient()
+                    if not await rc.try_set("test:startup:sent", ttl=24*3600):
+                        should_send = False
+                except Exception:
+                    # If Redis not available, send once per process
+                    if hasattr(_send_test_message, "_did"):
+                        should_send = False
+                    else:
+                        _send_test_message._did = True  # type: ignore
 
             if not should_send:
                 log.info("test_message_already_sent_recently")
