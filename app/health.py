@@ -18,7 +18,6 @@ async def check_binance(session: aiohttp.ClientSession) -> Dict[str, Any]:
         return {"ok": False, "endpoint": settings.BINANCE_BASE, "error": str(e)}
 
 async def check_supabase(session: aiohttp.ClientSession) -> Dict[str, Any]:
-    # Try a harmless GET to /rest/v1/ which should return 404/401 but proves reachability + auth header usage
     url = f"{settings.SUPABASE_URL.rstrip('/')}/rest/v1/"
     headers = {
         "Authorization": f"Bearer {settings.SUPABASE_SERVICE_KEY}",
