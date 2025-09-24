@@ -31,13 +31,13 @@ def _dedup_key(symbol: str, strat_name: str, side: str, candle_close_ms: int | N
     return "sig:" + hashlib.sha1(base.encode()).hexdigest()
 
 async def run_worker(stop_event: asyncio.Event):
-    redis = RedisClient())
-    supa = SupabaseClient(session)
-    
+    redis = RedisClient()
     pairs: List[str] = getattr(settings, "PAIRS", ["BTCUSDT"])
 
     async with aiohttp.ClientSession() as session:
-                        keepalive_task = asyncio.create_task(_keepalive_loop(session, stop_event))
+        binance = BinanceClient('https://fapi.binance.com', session)
+        supa = SupabaseClient(session)
+        keepalive_task = asyncio.create_task(_keepalive_loop(session, stop_event))
         try:
             while not stop_event.is_set():
                 for strat in STRATEGIES:
@@ -127,7 +127,6 @@ async def run_worker(stop_event: asyncio.Event):
             keepalive_task.cancel()
             with contextlib.suppress(Exception):
                 await keepalive_task
-
 import contextlib
 async def _keepalive_loop(session: aiohttp.ClientSession, stop_event: asyncio.Event):
     # Self-ping health endpoint to prevent idling
