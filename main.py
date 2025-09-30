@@ -2,6 +2,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 import logging
+import os
 from app.api import app as fastapi_app
 from app.telegram import bot
 from app.config import settings
