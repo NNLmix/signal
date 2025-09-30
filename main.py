@@ -2,7 +2,6 @@ import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 import logging
-import os
 from app.api import app as fastapi_app
 from app.telegram import bot
 from app.config import settings
@@ -28,6 +27,7 @@ async def lifespan(app: FastAPI):
     try:
         import aiohttp
         from app.services.binance import BinanceClient
+import os
         prices = {}
         async with aiohttp.ClientSession() as _s:
             b = BinanceClient(settings.BINANCE_BASE, _s)
