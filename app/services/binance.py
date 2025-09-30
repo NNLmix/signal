@@ -1,55 +1,55 @@
-
 import logging
-import time
-from typing import Any, List, Optional
 import aiohttp
+import time
+from typing import Any, List
 from tenacity import retry, stop_after_attempt, wait_exponential_jitter
-
 from ..config import settings
-
-log = logging.getLogger("binance")
+log = logging.getLogger('binance')
 
 class BinanceClient:
-    """Minimal async client for Binance Futures public endpoints used by strategies."""
-
     def __init__(self, base: str, session: aiohttp.ClientSession):
-        self.base = (base or "https://fapi.binance.com").rstrip("/")
+        self.base = base.rstrip('/')
         self.session = session
+        self._time_offset_ms = 0
 
-    # --- Public endpoints ---
-    @retry(stop=stop_after_attempt(settings.RETRY_MAX), wait=wait_exponential_jitter(initial=settings.RETRY_BASE_DELAY, max=8))
-    async def get_klines(self, symbol: str, interval: str, limit: int = 150) -> List[List[Any]]:
-        """Compatibility method: worker expects get_klines()."""
-        return await self.klines(symbol, interval, limit)
+    async def sync_time(self):
+        start = time.time(); log.info('binance_sync_time_start', extra={'url': f'{self.base}/fapi/v1/time'})
+        url = f"{self.base}/fapi/v1/time"
+        async with self.session.get(url, timeout=settings.REQUEST_TIMEOUT) as r:
+            r.raise_for_status()
+            data = await r.json()
+            log.info('binance_sync_time_ok', extra={'delta_ms': data.get('serverTime', 0) - int(time.time()*1000), 'status': r.status, 'elapsed_ms': int((time.time()-start)*1000)})
+            server_time = int(data["serverTime"])
+            local = int(time.time() * 1000)
+            self._time_offset_ms = server_time - local
 
-    @retry(stop=stop_after_attempt(settings.RETRY_MAX), wait=wait_exponential_jitter(initial=settings.RETRY_BASE_DELAY, max=8))
+    def _timestamp(self) -> int:
+        return int(time.time() * 1000) + self._time_offset_ms
+
+    @retry(stop=stop_after_attempt(settings.RETRY_MAX),
+           wait=wait_exponential_jitter(initial=settings.RETRY_BASE_DELAY, max=8))
     async def klines(self, symbol: str, interval: str, limit: int = 150) -> List[List[Any]]:
         url = f"{self.base}/fapi/v1/klines"
         params = {"symbol": symbol, "interval": interval, "limit": limit}
-        t0 = time.time()
-        async with self.session.get(url, params=params, timeout=getattr(settings, 'REQUEST_TIMEOUT', 10)) as r:
+        async with self.session.get(url, params=params, timeout=settings.REQUEST_TIMEOUT) as r:
             if r.status in (429, 418):
-                # Surface rate limiting to tenacity
                 raise RuntimeError(f"binance_rate_limit status={r.status}")
             r.raise_for_status()
-            data = await r.json()
-            try:
-                log.debug("binance_klines_ok", extra={"symbol": symbol, "interval": interval, "limit": limit, "status": r.status, "elapsed_ms": int((time.time()-t0)*1000)})
-            except Exception:
-                pass
-            return data
+            return await r.json()
 
-    @retry(stop=stop_after_attempt(settings.RETRY_MAX), wait=wait_exponential_jitter(initial=settings.RETRY_BASE_DELAY, max=8))
+    @retry(stop=stop_after_attempt(settings.RETRY_MAX),
+           wait=wait_exponential_jitter(initial=settings.RETRY_BASE_DELAY, max=8))
     async def ticker_price(self, symbol: str) -> float:
+        t0 = time.time()
         url = f"{self.base}/fapi/v1/ticker/price"
         params = {"symbol": symbol}
-        t0 = time.time()
-        async with self.session.get(url, params=params, timeout=getattr(settings, 'REQUEST_TIMEOUT', 10)) as r:
+        async with self.session.get(url, params=params, timeout=5) as r:
+            # Let non-200 raise for visibility
             r.raise_for_status()
             data = await r.json()
             price = float(data.get("price", 0.0))
             try:
-                log.debug("binance_ticker_price_ok", extra={"symbol": symbol, "status": r.status, "elapsed_ms": int((time.time()-t0)*1000), "price": price})
+                log.info("binance_ticker_price_ok", extra={"symbol": symbol, "status": r.status, "elapsed_ms": int((time.time()-t0)*1000), "price": price})
             except Exception:
                 pass
             return price

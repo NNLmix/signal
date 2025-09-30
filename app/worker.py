@@ -14,7 +14,6 @@ from .services.indicators import atr
 from .telegram import send_signal_message
 
 log = logging.getLogger("worker")
-log.info("worker_boot")
 
 NY_TZ = tz.gettz("America/New_York")
 UA_TZ = tz.gettz("Europe/Kyiv")

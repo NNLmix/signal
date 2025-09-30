@@ -1,30 +1,27 @@
-
 import logging
 from aiogram import types
 from aiogram.dispatcher.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from .telegram import dp
-from .config import settings
+from signal.app.telegram import dp
+from signal.app.config import settings
+
 try:
-    from .services.strategies.loader import get_strategies
-    _use_loader = True
+    from signal.app.services.strategies.loader import load_all
+    def _get_strategies_dict():
+        return load_all()
 except Exception:
-    from .services.strategies import STRATEGIES as _STRATEGIES_LIST  # fallback
-    _use_loader = False
+    from signal.app.services.strategies import STRATEGIES as _STRATEGIES_LIST
+    def _get_strategies_dict():
+        return {getattr(s, "name", s.__class__.__name__): s for s in _STRATEGIES_LIST}
 
 log = logging.getLogger("tg_backtest")
 
 def _kb():
     kb = InlineKeyboardMarkup(row_width=1)
     try:
-        if _use_loader:
-            for name in get_strategies().keys():
-                kb.add(InlineKeyboardButton(text=name, callback_data=f"backtest:{name}"))
-        else:
-            for s in _STRATEGIES_LIST:
-                name = getattr(s, "name", s.__class__.__name__)
-                kb.add(InlineKeyboardButton(text=name, callback_data=f"backtest:{name}"))
+        for name in _get_strategies_dict().keys():
+            kb.add(InlineKeyboardButton(text=name, callback_data=f"backtest:{name}"))
         return kb
     except Exception as e:
         log.exception("kb_build_failed", extra={"error": str(e)})
@@ -44,28 +41,21 @@ async def backtest_click(c: types.CallbackQuery):
         return
     log.info("cb_backtest_click", extra={"chat_id": c.message.chat.id if c.message else None, "name": name})
 
-    strat = None
-    interval = "5m"
-    if _use_loader:
-        strat = get_strategies().get(name)
-        if strat:
-            interval = getattr(strat, "timeframe", "5m")
-    else:
-        for s in _STRATEGIES_LIST:
-            if getattr(s, "name", None) == name:
-                strat = s
-                interval = getattr(strat, "timeframe", "5m")
-                break
-
+    strategies = _get_strategies_dict()
+    strat = strategies.get(name)
     if not strat:
         await c.message.answer(f"Стратегия '{name}' не найдена")
         await c.answer()
         return
 
+    interval = getattr(strat, "timeframe", "5m")
     pairs = getattr(settings, "PAIRS", ["BTCUSDT"])
+
     try:
-        from .services.backtest import run_backtest
-        await c.message.answer(f"▶️ Бэктест '{name}' · {interval}\nПары: {', '.join(pairs)}\nПериод: 3 месяца\nКапитал: $100")
+        from signal.app.services.backtest import run_backtest
+        await c.message.answer(
+            f"▶️ Бэктест '{name}' · {interval}\nПары: {', '.join(pairs)}\nПериод: 3 месяца\nКапитал: $100"
+        )
         res = await run_backtest(name, strat, pairs, interval, months=3)
         lines = [f"{sym}: {r['trades']} сделок, winrate {r['winrate']:.1f}%" for sym, r in res['per_symbol'].items()]
         txt = (f"✅ *{res['strategy']}* · {res['interval']}\n"
