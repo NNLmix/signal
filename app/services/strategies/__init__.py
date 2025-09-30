@@ -1,4 +1,5 @@
-from signal.app.config import settings
+
+from app.config import settings
 from .loader import load_all
 
 _loaded = load_all()

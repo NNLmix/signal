@@ -1,17 +1,18 @@
+
 import logging
 from aiogram import types
 from aiogram.dispatcher.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from signal.app.telegram import dp
-from signal.app.config import settings
+from app.telegram import dp
+from app.config import settings
 
 try:
-    from signal.app.services.strategies.loader import load_all
+    from app.services.strategies.loader import load_all
     def _get_strategies_dict():
         return load_all()
 except Exception:
-    from signal.app.services.strategies import STRATEGIES as _STRATEGIES_LIST
+    from app.services.strategies import STRATEGIES as _STRATEGIES_LIST
     def _get_strategies_dict():
         return {getattr(s, "name", s.__class__.__name__): s for s in _STRATEGIES_LIST}
 
@@ -52,7 +53,7 @@ async def backtest_click(c: types.CallbackQuery):
     pairs = getattr(settings, "PAIRS", ["BTCUSDT"])
 
     try:
-        from signal.app.services.backtest import run_backtest
+        from app.services.backtest import run_backtest
         await c.message.answer(
             f"▶️ Бэктест '{name}' · {interval}\nПары: {', '.join(pairs)}\nПериод: 3 месяца\nКапитал: $100"
         )

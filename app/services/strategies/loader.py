@@ -1,13 +1,14 @@
+
 from __future__ import annotations
 import importlib, pkgutil
 from pathlib import Path
 from typing import Dict
 from .base import BaseStrategy
 
-PKG = "signal.app.services.strategies"
+PKG = "app.services.strategies"
 
 def _iter_mods():
-    import signal.app.services.strategies as pkg
+    import app.services.strategies as pkg
     pkg_path = Path(pkg.__file__).parent
     for m in pkgutil.iter_modules([str(pkg_path)]):
         name = m.name

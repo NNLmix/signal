@@ -1,9 +1,10 @@
+
 import time, logging
 from typing import List, Dict, Any
 from datetime import datetime, timedelta, timezone
 import aiohttp
 
-from signal.app.config import settings
+from app.config import settings
 
 log = logging.getLogger("backtest")
 
