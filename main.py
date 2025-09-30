@@ -14,7 +14,7 @@ worker_task = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    setup_logging(settings.LOG_LEVEL)
+    setup_logging(getattr(settings, 'LOG_LEVEL', os.getenv('LOG_LEVEL', 'INFO')))
     # Detect and log public IP for whitelisting
     try:
         log = logging.getLogger('startup')
