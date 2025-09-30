@@ -1,7 +1,9 @@
+import os
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
-import logging
+
 from app.api import app as fastapi_app
 from app.telegram import bot
 from app.config import settings
@@ -14,56 +16,39 @@ worker_task = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    setup_logging(getattr(settings, 'LOG_LEVEL', os.getenv('LOG_LEVEL', 'INFO')))
-    # Detect and log public IP for whitelisting
+    # initialize logging level (env wins if provided)
+    setup_logging(os.getenv("LOG_LEVEL", getattr(settings, "LOG_LEVEL", "INFO")))
+    logger = logging.getLogger("startup")
+
+    # discover and log public IP (best effort)
     try:
-        log = logging.getLogger('startup')
         ip = await get_public_ip()
-        log.info('public_ip', extra={'ip': ip})
-    except Exception as e:
-        logging.getLogger('startup').warning('public_ip_error', extra={'error': str(e)})
+        logger.info("public_ip", extra={"ip": ip})
+    except Exception:
+        logger.warning("public_ip_failed", exc_info=True)
 
-    # Fetch and log current futures prices for configured pairs
-    try:
-        import aiohttp
-        from app.services.binance import BinanceClient
-import os
-        prices = {}
-        async with aiohttp.ClientSession() as _s:
-            b = BinanceClient(settings.BINANCE_BASE, _s)
-            await b.sync_time()
-            for sym in settings.PAIRS:
-                try:
-                    prices[sym] = await b.ticker_price(sym)
-                except Exception as e:
-                    prices[sym] = f'error: {e}'
-        logging.getLogger('startup').info('futures_prices', extra={'prices': prices})
-    except Exception as e:
-        logging.getLogger('startup').warning('futures_prices_error', extra={'error': str(e)})
-
-    public_url = (settings.PUBLIC_URL or settings.KOYEB_APP_URL)
-    if public_url:
-        public_url = public_url.rstrip("/")
+    # configure webhook
+    public_url = getattr(settings, "PUBLIC_URL", os.getenv("PUBLIC_URL", ""))
+    webhook_url = f"{public_url.rstrip('/')}/webhook" if public_url else None
+    if webhook_url:
+        await bot.set_webhook(webhook_url, drop_pending_updates=True)
+        logger.info("webhook_set", extra={"url": webhook_url})
     else:
-        print("WARN: No PUBLIC_URL or KOYEB_APP_URL set. Telegram webhook will NOT be configured; bot will not receive updates.")
+        logger.warning("no_public_url_for_webhook")
 
-    # Telegram webhook lifecycle
-    await bot.delete_webhook(drop_pending_updates=True)
-    await asyncio.sleep(1.0)
-    if public_url:
-        await bot.set_webhook(f"{public_url}/webhook")
-
-    # Start worker
     global worker_task
     worker_task = asyncio.create_task(run_worker(stop_event))
+
     try:
         yield
     finally:
         stop_event.set()
         if worker_task:
             await worker_task
-        await bot.delete_webhook()
-        await bot.session.close()
+        try:
+            await bot.delete_webhook()
+        finally:
+            await bot.session.close()
 
 app = FastAPI(lifespan=lifespan)
 
