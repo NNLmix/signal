@@ -1,13 +1,13 @@
+
 from ...config import settings
-from .btc_price_threshold import Strategy as BtcPriceThreshold
-from .trend_pullback import Strategy as TrendPullback
-from .four_hour_reentry import Strategy as FourHourReentry
+from .loader import load_all
 
-_ALL = [
-    BtcPriceThreshold(),
-    TrendPullback(),
-    FourHourReentry(),
-]
+# Автопоиск стратегий в пакете (каждый *.py с классом Strategy/переменной STRATEGY)
+_loaded = load_all()
 
-# Apply toggles from settings.STRATEGY_TOGGLES
-STRATEGIES = [s for s in _ALL if settings.STRATEGY_TOGGLES.get(getattr(s, "name", ""), True)]
+# Применяем флаги из settings.STRATEGY_TOGGLES
+def _enabled(name: str) -> bool:
+    toggles = getattr(settings, "STRATEGY_TOGGLES", {})
+    return toggles.get(name, True)
+
+STRATEGIES = [s for (name, s) in _loaded.items() if _enabled(name)]
