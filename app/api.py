@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request, HTTPException
 from aiogram import types
 from .telegram import dp, bot
-import app.telegram_backtest  # register backtest handlers
+import app.telegram_backtest
 from .config import settings
 import asyncio
 
